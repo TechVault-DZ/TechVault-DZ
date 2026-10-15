@@ -67,23 +67,37 @@ jobs:
           restore-keys: buildozer-local-
 
       - name: Build APK
+        shell: bash
         run: |
+          set -o pipefail
           export ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           buildozer -v android debug 2>&1 | tee build_output.log
 
-      - name: Show last 100 lines of build output
+      - name: Show last 150 lines of build output
         if: always()
         run: |
-          echo "=== LAST 100 LINES ==="
-          tail -100 build_output.log || echo "No build_output.log"
+          echo "=== LAST 150 LINES ==="
+          tail -150 build_output.log || echo "No build_output.log"
+
+      - name: Check bin folder
+        if: always()
+        run: |
+          echo "=== Contents of ./bin ==="
+          ls -la bin/ || echo "bin/ does not exist"
+          echo "=== Searching for any APK anywhere ==="
+          find . -name "*.apk" -type f 2>/dev/null || echo "No APK found anywhere"
+          echo "=== Searching for AAB ==="
+          find . -name "*.aab" -type f 2>/dev/null || echo "No AAB found"
 
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: TechVaultDZ-debug-apk
-          path: bin/*.apk
+          path: |
+            bin/*.apk
+            .buildozer/android/platform/build-*/dists/*/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
       - name: Upload build logs
