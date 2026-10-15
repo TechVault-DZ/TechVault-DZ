@@ -86,23 +86,24 @@
         const products = [
     {
         "id": 1,
-        "category": "android",
+        "category": "desktop",
         "icon": "fa-solid fa-code",
         "color": "from-blue-500 to-indigo-600",
         "image": "showroom.png",
+        "download_url": "",
         "name": {
-            "ar": "تطبيق إدارة معرض سيارات",
-            "fr": "ShowroomManager",
-            "en": "ShowroomManager"
+            "ar": "نالببي",
+            "fr": "",
+            "en": ""
         },
         "desc": {
-            "ar": "الحل الأمثل لإدارة معارض ووكالات السيارات باحترافية وسهولة. نظّم مخزون السيارات، بيانات الزبائن، والعقود في مكان واحد مع دعم كامل للغتين العربية والفرنسية، وإصدار فوري للمستندات الرسمية بصيغة PDF المزودة برموز الـ QR للتوثيق والتحقق السريع.",
-            "fr": "La solution idéale pour gérer les showrooms et agences automobiles avec professionnalisme et simplicité. Organisez votre stock de véhicules, vos données clients et vos contrats en un seul endroit, avec un support complet pour les langues arabe et française, et l'émission instantanée de documents officiels au format PDF équipés de codes QR pour l'authentification et la vérification rapide.",
-            "en": "The ultimate solution for managing car dealerships and showrooms with professionalism and ease. Organize your vehicle inventory, customer data, and contracts in one place with full support for both Arabic and French, and instantly issue official PDF documents equipped with QR codes for quick documentation and verification."
+            "ar": "نتال",
+            "fr": "",
+            "en": ""
         },
         "version": "v1.0.0",
-        "size": "55 MB",
-        "rating": 4.0
+        "size": "20 MB",
+        "rating": 4.8
     }
 ];
 
@@ -230,6 +231,7 @@
                 const name = p.name[currentLang] || p.name['ar'];
                 const desc = p.desc[currentLang] || p.desc['ar'];
                 const t = translations[currentLang];
+                const downloadUrl = p.download_url && p.download_url.trim() !== "" ? p.download_url : "#";
 
                 const iconOrImage = p.image 
                     ? `<img src="${p.image}" alt="${name}" class="w-14 h-14 rounded-2xl object-cover shadow-md group-hover:scale-105 transition-transform">`
@@ -251,17 +253,17 @@
                                     <span>${p.rating}</span>
                                 </div>
                             </div>
-                            <p class="text-gray-600 dark:text-gray-300 text-sm mb-6 line-clamp-2">${desc}</p>
+                            <p class="text-gray-600 dark:text-gray-300 text-sm mb-6">${desc}</p>
                         </div>
                         <div class="space-y-4">
                             <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pt-3 border-t border-gray-100 dark:border-gray-700">
                                 <span>${t.version}: <strong class="text-gray-700 dark:text-gray-200">${p.version}</strong></span>
                                 <span>${t.size}: <strong class="text-gray-700 dark:text-gray-200">${p.size}</strong></span>
                             </div>
-                            <button onclick="alert('جاري التحميل...')" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 text-sm">
+                            <a href="${downloadUrl}" target="_blank" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 text-sm">
                                 <i class="fa-solid fa-download"></i>
                                 <span>${t.download}</span>
-                            </button>
+                            </a>
                         </div>
                     </div>
                 `;
