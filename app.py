@@ -66,6 +66,49 @@ def translate_text(text, target_lang):
   return ""
 
 
+# 0. شاشة البداية (Splash Screen)
+class SplashScreen(Screen):
+
+  def __init__(self, **kwargs):
+    super(SplashScreen, self).__init__(**kwargs)
+    layout = BoxLayout(orientation="vertical", padding=dp(30), spacing=dp(15))
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    logo_path = os.path.join(base_dir, "logo.png")
+
+    if os.path.exists(logo_path):
+      layout.add_widget(
+          Image(
+              source=logo_path,
+              allow_stretch=True,
+              keep_ratio=True,
+              size_hint=(1, 1),
+          )
+      )
+    else:
+      layout.add_widget(
+          Label(
+              text="TechVault DZ",
+              font_size=sp(30),
+              bold=True,
+              color=(0.05, 0.58, 0.38, 1),
+              font_name=FONT_PATH if FONT_PATH else "Roboto",
+          )
+      )
+
+    layout.add_widget(
+        Label(
+            text=format_ar("الخزنة الجزائرية للبرمجيات 🇩🇿"),
+            font_size=sp(14),
+            color=(0.3, 0.3, 0.3, 1),
+            size_hint_y=None,
+            height=dp(30),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+    )
+    self.add_widget(layout)
+
+
 # 1. شاشة تسجيل الدخول بكلمة السر
 class LoginScreen(Screen):
 
@@ -287,7 +330,6 @@ class ProductsScreen(Screen):
     )
     btn_add.bind(on_press=lambda x: self.open_product_form())
 
-    # زر واحد: حفظ index.html ثم رفعه إلى GitHub
     btn_save = Button(
         text=format_ar("حفظ ورفع"),
         size_hint_x=0.4,
@@ -614,7 +656,6 @@ class ProductsScreen(Screen):
     except Exception as e:
       self.status_label.text = format_ar(f"خطأ حفظ: {str(e)[:30]}")
 
-  # ---------- حفظ إعدادات GitHub ----------
   def _gh_config_path(self):
     return os.path.join(App.get_running_app().user_data_dir, "github_config.json")
 
@@ -634,7 +675,6 @@ class ProductsScreen(Screen):
       pass
 
   def save_and_push(self, instance):
-    """حفظ index.html ثم رفعه؛ إن لم تكن البيانات محفوظة تُطلب أول مرة."""
     cfg = self.load_gh_config()
     if not (cfg.get("user") and cfg.get("repo") and cfg.get("token")):
       self.open_github_popup(None, then_push=True)
@@ -815,7 +855,6 @@ class ProductsScreen(Screen):
         lbl_git_status.text = format_ar("الرجاء ملء جميع الحقول المطلوبة!")
         return
 
-      # حفظ البيانات للمرات القادمة (ويمكن تغييرها من هنا في أي وقت)
       self.store_gh_config(user, repo, token)
       self.save_html(None)
       lbl_git_status.text = format_ar("جاري الرفع إلى GitHub...")
@@ -1127,6 +1166,7 @@ class TechVaultApp(App):
   def build(self):
     self.title = "TechVault DZ Dashboard"
     sm = ScreenManager()
+    sm.add_widget(SplashScreen(name="splash"))
     sm.add_widget(LoginScreen(name="login"))
     sm.add_widget(HomeScreen(name="home"))
     sm.add_widget(ProductsScreen(name="products"))
@@ -1134,12 +1174,15 @@ class TechVaultApp(App):
     sm.add_widget(SettingsScreen(name="settings"))
 
     Window.bind(on_keyboard=self._on_keyboard)
+
+    # الانتقال التلقائي من شاشة البداية إلى تسجيل الدخول بعد 2.5 ثانية
+    Clock.schedule_once(lambda dt: setattr(sm, "current", "login"), 2.5)
     return sm
 
   def _on_keyboard(self, window, key, *args):
     if key == 27:
       sm = self.root
-      if sm and sm.current not in ["home", "login"]:
+      if sm and sm.current not in ["home", "login", "splash"]:
         sm.current = "home"
         return True
     return False

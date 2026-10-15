@@ -16,9 +16,10 @@ requirements = python3,kivy==2.3.0,arabic-reshaper,python-bidi
 orientation = portrait
 fullscreen = 0
 
-# الأيقونة وشاشة البداية (استخدم logo.png كأيقونة)
+# الأيقونة وشاشة البداية على مستوى أندرويد
 icon.filename = %(source.dir)s/logo.png
 presplash.filename = %(source.dir)s/logo.png
+presplash.color = #FFFFFF
 
 # الأذونات: إنترنت (GitHub API + الترجمة) + التخزين
 android.permissions = INTERNET,ACCESS_NETWORK_STATE,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
