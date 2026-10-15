@@ -39,6 +39,19 @@ jobs:
           pip install --upgrade pip
           pip install --upgrade buildozer "cython<3.0" virtualenv
 
+      - name: Verify project files
+        run: |
+          echo "=== Files in repo ==="
+          ls -la
+          echo "=== Checking critical files ==="
+          for f in app.py buildozer.spec index.html logo.png arabic.ttf; do
+            if [ -f "$f" ]; then
+              echo "OK: $f ($(stat -c%s "$f") bytes)"
+            else
+              echo "MISSING: $f"
+            fi
+          done
+
       - name: Cache Buildozer global
         uses: actions/cache@v4
         with:
@@ -57,21 +70,28 @@ jobs:
         run: |
           export ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk
           export ANDROID_SDK_ROOT=$ANDROID_HOME
-          buildozer -v android debug
+          buildozer -v android debug 2>&1 | tee build_output.log
+
+      - name: Show last 100 lines of build output
+        if: always()
+        run: |
+          echo "=== LAST 100 LINES ==="
+          tail -100 build_output.log || echo "No build_output.log"
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: TechVaultDZ-debug-apk
           path: bin/*.apk
           if-no-files-found: error
 
-      - name: Upload build logs on failure
-        if: failure()
+      - name: Upload build logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: buildozer-logs
           path: |
-            .buildozer/android/platform/build-*/build.log
-            .buildozer/android/platform/build-*/dists/*/build/outputs/logs/*.txt
-          if-no-files-found: ignore
+            build_output.log
+            .buildozer/**/*.log
+          if-no-files-found: warn
