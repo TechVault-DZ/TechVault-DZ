@@ -1,48 +1,36 @@
 [app]
 title = TechVault DZ
 package.name = techvaultdz
-package.domain = dz.techvault
-
+package.domain = org.techvault
 source.dir = .
-source.include_exts = py,png,jpg,jpeg,kv,atlas,html,ttf,json,txt,md
-source.exclude_dirs = bin,.buildozer,__pycache__,.github
-source.exclude_patterns = *.pyc,*.pyo,.git*
+source.include_exts = py,png,jpg,kv,atlas,ttf
+source.exclude_dirs = bin, .buildozer, venv, __pycache__, .git
+source.exclude_patterns = private_key.pem, *.keystore
 
-version = 2.1.0
+icon.filename = %(source.dir)s/logo.png
+presplash.filename = %(source.dir)s/presplash.png
+presplash.color = #0F172A
 
-# المتطلبات: Kivy + دعم العربية + sqlite3
-# - sqlite3 : ضروري وإلا يفشل import sqlite3 على الهاتف
-# - python-bidi==0.4.2 : النسخ الأحدث مكتوبة بـ Rust ولا تُبنى على Android
-requirements = python3,hostpython3,kivy==2.3.0,sqlite3,arabic-reshaper,python-bidi==0.4.2
+# المتطلبات المستقرة والمتوافقة مع مكتبات التطبيق (arabic_reshaper, bidi, pillow, urllib إلخ)
+requirements = python3,hostpython3,kivy==2.3.0,pillow,arabic-reshaper,python-bidi,certifi,urllib3
 
 orientation = portrait
 fullscreen = 0
 
-# الأيقونة وشاشة البداية على مستوى أندرويد
-icon.filename = %(source.dir)s/logo.png
-presplash.filename = %(source.dir)s/logo.png
-presplash.color = #FFFFFF
-
-# الأذونات: إنترنت (GitHub API + الترجمة) + التخزين
-android.permissions = INTERNET,ACCESS_NETWORK_STATE,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
-
 android.api = 33
-android.minapi = 21
+android.minapi = 24
 android.ndk = 25b
-android.ndk_api = 21
-android.archs = arm64-v8a, armeabi-v7a
-android.allow_backup = True
-android.wakelock = False
+android.ndk_api = 24
+android.archs = arm64-v8a
 android.accept_sdk_license = True
 
-# إعدادات تجميع
-android.debug_artifact = apk
-android.release_artifact = aab
+# الصلاحيات المطلوبة للإنترنت (GitHub API والترجمة) وقراءة التخزين لاستعراض الصور
+android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE
 
-android.enable_androidx = True
+android.allow_backup = False
 android.logcat_filters = *:S python:D
 
-# نسخة p4a مستقرة مع kivy 2.3.0 / Python 3.11 / NDK 25b
+# نسخة p4a المستقرة
 p4a.branch = v2024.01.21
 
 [buildozer]
