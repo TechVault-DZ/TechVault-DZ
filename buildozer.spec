@@ -19,7 +19,8 @@ presplash.color = #FFFFFF
 # - sqlite3 : ضروري وإلا يفشل import sqlite3 على الهاتف
 # - python-bidi==0.4.2 : النسخ الأحدث Rust ولا تُبنى على Android
 # - pillow : لمعاينة الصور في FileChooserIconView
-requirements = python3,hostpython3,kivy==2.3.0,sqlite3,pillow,arabic-reshaper,python-bidi==0.4.2
+
+requirements = python3,hostpython3,kivy==2.3.0,sqlite3,pillow,certifi,arabic-reshaper,python-bidi==0.4.2
 
 orientation = portrait
 fullscreen = 0
