@@ -21,11 +21,10 @@ from kivy.uix.popup import Popup
 from kivy.uix.screenmanager import Screen, ScreenManager
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
+from kivy.uix.filechooser import FileChooserIconView
 
-# تعيين خلفية فاتحة موحدة للتطبيق
 Window.clearcolor = (0.95, 0.97, 0.95, 1)
 
-# استيراد أدوات إصلاح الحروف العربية
 try:
   import arabic_reshaper
   from bidi.algorithm import get_display
@@ -66,13 +65,11 @@ def translate_text(text, target_lang):
   return ""
 
 
-# 0. شاشة البداية (Splash Screen)
 class SplashScreen(Screen):
 
   def __init__(self, **kwargs):
     super(SplashScreen, self).__init__(**kwargs)
     layout = BoxLayout(orientation="vertical", padding=dp(30), spacing=dp(15))
-
     base_dir = os.path.dirname(os.path.abspath(__file__))
     logo_path = os.path.join(base_dir, "logo.png")
 
@@ -109,7 +106,6 @@ class SplashScreen(Screen):
     self.add_widget(layout)
 
 
-# 1. شاشة تسجيل الدخول بكلمة السر
 class LoginScreen(Screen):
 
   def __init__(self, **kwargs):
@@ -202,7 +198,6 @@ class LoginScreen(Screen):
       self.error_label.text = format_ar("كلمة المرور غير صحيحة!")
 
 
-# 2. الشاشة الرئيسية
 class HomeScreen(Screen):
 
   def __init__(self, **kwargs):
@@ -288,7 +283,6 @@ class HomeScreen(Screen):
     self.add_widget(layout)
 
 
-# 3. شاشة إدارة المنتجات
 class ProductsScreen(Screen):
 
   def __init__(self, **kwargs):
@@ -296,6 +290,7 @@ class ProductsScreen(Screen):
     self.products = []
     base_dir = os.path.dirname(os.path.abspath(__file__))
     self.html_path = os.path.join(base_dir, "index.html")
+    self.full_image_paths = {}
 
     root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(10))
 
@@ -441,6 +436,66 @@ class ProductsScreen(Screen):
       self.refresh_products_list()
       self.status_label.text = format_ar("تم الحذف. اضغط 'حفظ' في الأعلى.")
 
+  def open_file_chooser_popup(self, text_input_field):
+    content = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(10))
+    with content.canvas.before:
+      Color(0.12, 0.15, 0.13, 1)
+      self.bg_chooser = Rectangle(size=content.size, pos=content.pos)
+    content.bind(
+        size=lambda s, w: setattr(self.bg_chooser, "size", s.size),
+        pos=lambda s, w: setattr(self.bg_chooser, "pos", s.pos),
+    )
+
+    initial_path = (
+        "/sdcard" if os.path.exists("/sdcard") else os.path.expanduser("~")
+    )
+    file_chooser = FileChooserIconView(
+        filters=["*.png", "*.jpg", "*.jpeg"], path=initial_path, size_hint=(1, 1)
+    )
+    content.add_widget(file_chooser)
+
+    btn_layout = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
+    btn_select = Button(
+        text=format_ar("اختيار هذه الصورة"),
+        background_color=(0.05, 0.58, 0.38, 1),
+        color=(1, 1, 1, 1),
+        bold=True,
+        font_name=FONT_PATH if FONT_PATH else "Roboto",
+    )
+    btn_cancel = Button(
+        text=format_ar("إلغاء"),
+        background_color=(0.7, 0.2, 0.2, 1),
+        color=(1, 1, 1, 1),
+        bold=True,
+        font_name=FONT_PATH if FONT_PATH else "Roboto",
+    )
+
+    popup = Popup(
+        title=format_ar("📁 اختر صورة المنتج بدقة"),
+        title_font=FONT_PATH if FONT_PATH else "Roboto",
+        title_size=sp(16),
+        title_align="center",
+        content=content,
+        size_hint=(0.94, 0.92),
+        separator_color=(0.05, 0.58, 0.38, 1),
+    )
+
+    def on_select(instance):
+      if file_chooser.selection:
+        full_path = file_chooser.selection[0]
+        filename = os.path.basename(full_path)
+        text_input_field.text = filename
+        self.full_image_paths[filename] = full_path
+      popup.dismiss()
+
+    btn_select.bind(on_press=on_select)
+    btn_cancel.bind(on_press=popup.dismiss)
+
+    btn_layout.add_widget(btn_select)
+    btn_layout.add_widget(btn_cancel)
+    content.add_widget(btn_layout)
+    popup.open()
+
   def open_product_form(self, idx=None):
     is_edit = idx is not None
     p = (
@@ -509,7 +564,7 @@ class ProductsScreen(Screen):
         ("desc_en", "الوصف (إنجليزي)", p.get("desc", {}).get("en", "")),
         ("version", "رقم الإصدار", p.get("version", "")),
         ("size", "الحجم", p.get("size", "")),
-        ("rating", "التقييم", str(p.get("rating", 4.8))),
+        ("rating", "التقييم (للزوار)", str(p.get("rating", 4.8))),
     ]
 
     for key, label_text, val in fields:
@@ -539,6 +594,30 @@ class ProductsScreen(Screen):
         form_layout.add_widget(spinner)
         continue
 
+      if key == "image":
+        img_layout = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(5))
+        ti_img = TextInput(
+            text=str(val),
+            multiline=False,
+            size_hint_x=0.70,
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        self.inputs[key] = ti_img
+        btn_browse = Button(
+            text=format_ar("📁 استعراض"),
+            size_hint_x=0.30,
+            background_color=(0.15, 0.35, 0.55, 1),
+            color=(1, 1, 1, 1),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        btn_browse.bind(
+            on_press=lambda x, field=ti_img: self.open_file_chooser_popup(field)
+        )
+        img_layout.add_widget(ti_img)
+        img_layout.add_widget(btn_browse)
+        form_layout.add_widget(img_layout)
+        continue
+
       ti = TextInput(
           text=str(val),
           multiline=False,
@@ -562,7 +641,6 @@ class ProductsScreen(Screen):
         tr_name_en = translate_text(ar_n, "en") if ar_n else ""
         tr_desc_fr = translate_text(ar_d, "fr") if ar_d else ""
         tr_desc_en = translate_text(ar_d, "en") if ar_d else ""
-
         if tr_name_fr:
           self.inputs["name_fr"].text = tr_name_fr
         if tr_name_en:
@@ -608,7 +686,7 @@ class ProductsScreen(Screen):
             "category": self.inputs["category"].text.strip(),
             "icon": self.inputs["icon"].text.strip(),
             "color": self.inputs["color"].text.strip(),
-            "image": self.inputs["image"].text.strip(),
+            "image": os.path.basename(self.inputs["image"].text.strip()),
             "name": {
                 "ar": self.inputs["name_ar"].text.strip(),
                 "fr": self.inputs["name_fr"].text.strip(),
@@ -631,7 +709,7 @@ class ProductsScreen(Screen):
         self.status_label.text = format_ar("تم التحديث. اضغط 'حفظ' في الأعلى.")
         popup.dismiss()
       except Exception as e:
-        self.status_label.text = format_ar(f"خطأ: {str(e)[:25]}")
+        self.status_label.text = format_ar(f"خطأ في الحفظ: {str(e)[:25]}")
 
     btn_save_p.bind(on_press=save_action)
     btn_cancel.bind(on_press=popup.dismiss)
@@ -706,6 +784,28 @@ class ProductsScreen(Screen):
         if os.path.exists(logo_path):
           files.append(("logo.png", logo_path))
 
+        for p in self.products:
+          img_name = p.get("image", "")
+          if img_name and not img_name.startswith("http"):
+            local_img_path = self.full_image_paths.get(img_name, "")
+            if not local_img_path or not os.path.exists(local_img_path):
+              candidate = os.path.join(
+                  os.path.dirname(os.path.abspath(__file__)), img_name
+              )
+              if os.path.exists(candidate):
+                local_img_path = candidate
+              else:
+                sd_path = os.path.join("/sdcard/Download", img_name)
+                if os.path.exists(sd_path):
+                  local_img_path = sd_path
+
+            if (
+                local_img_path
+                and os.path.exists(local_img_path)
+                and (img_name, local_img_path) not in files
+            ):
+              files.append((img_name, local_img_path))
+
         for name, path in files:
           api_url = f"https://api.github.com/repos/{user}/{repo}/contents/{name}"
           sha = ""
@@ -715,25 +815,35 @@ class ProductsScreen(Screen):
               sha = json.loads(resp.read().decode("utf-8")).get("sha", "")
           except Exception:
             pass
+
           with open(path, "rb") as f:
-            encoded = base64.b64encode(f.read()).decode("utf-8")
+            file_bytes = f.read()
+          encoded = base64.b64encode(file_bytes).decode("utf-8")
+
           payload = {
               "message": f"Update {name} via TechVault DZ Dashboard",
               "content": encoded,
+              "branch": "main",
           }
           if sha:
             payload["sha"] = sha
+
           req_put = urllib.request.Request(
               api_url,
               data=json.dumps(payload).encode("utf-8"),
               headers=headers,
               method="PUT",
           )
-          with urllib.request.urlopen(req_put):
-            pass
-        set_status("تم الحفظ ورفع الملفات إلى GitHub بنجاح!")
+          try:
+            with urllib.request.urlopen(req_put) as resp:
+              pass
+          except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8")
+            raise Exception(f"فشل رفع {name} ({e.code}): {error_body[:80]}")
+
+        set_status("تم الحفظ ورفع الملفات والصور إلى GitHub بنجاح!")
       except Exception as e:
-        set_status(f"خطأ في الاتصال: {str(e)[:25]}")
+        set_status(f"خطأ أثناء الرفع: {str(e)}")
 
     threading.Thread(target=background_push, daemon=True).start()
 
@@ -874,7 +984,6 @@ class ProductsScreen(Screen):
     popup.open()
 
 
-# 4. شاشة سجلات الأمان
 class LogsScreen(Screen):
 
   def __init__(self, **kwargs):
@@ -946,7 +1055,6 @@ class LogsScreen(Screen):
     self.add_widget(scroll)
 
 
-# 5. شاشة الإعدادات
 class SettingsScreen(Screen):
 
   def __init__(self, **kwargs):
@@ -1027,7 +1135,9 @@ class SettingsScreen(Screen):
         font_name=FONT_PATH if FONT_PATH else "Roboto",
     )
     btn_gh_settings.bind(
-        on_press=lambda x: self.manager.get_screen("products").open_github_popup(None)
+        on_press=lambda x: self.manager.get_screen("products").open_github_popup(
+            None
+        )
     )
     layout.add_widget(btn_gh_settings)
 
@@ -1159,7 +1269,6 @@ class SettingsScreen(Screen):
     popup.open()
 
 
-# التطبيق الرئيسي وتجميع الشاشات ودعم زر العودة للهاتف
 class TechVaultApp(App):
   vault_password = "1234"
 
@@ -1174,8 +1283,6 @@ class TechVaultApp(App):
     sm.add_widget(SettingsScreen(name="settings"))
 
     Window.bind(on_keyboard=self._on_keyboard)
-
-    # الانتقال التلقائي من شاشة البداية إلى تسجيل الدخول بعد 2.5 ثانية
     Clock.schedule_once(lambda dt: setattr(sm, "current", "login"), 2.5)
     return sm
 
