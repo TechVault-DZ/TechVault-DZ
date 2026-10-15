@@ -13,7 +13,7 @@ icon.filename = %(source.dir)s/logo.png
 presplash.filename = %(source.dir)s/presplash.png
 presplash.color = #0F172A
 
-requirements = python3,hostpython3,kivy==2.3.0,pillow,arabic-reshaper,python-bidi,certifi,urllib3
+requirements = python3,hostpython3,kivy==2.3.0,pillow,arabic-reshaper,python-bidi==0.4.2,certifi,urllib3
 
 orientation = portrait
 fullscreen = 0
