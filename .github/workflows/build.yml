@@ -1,77 +1,52 @@
-name: Build TechVault DZ APK
+name: Build Android APK
 
 on:
   push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
-  build-android:
-    name: Build Android APK (arm64 + armv7)
-    runs-on: ubuntu-22.04
+  build:
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout Code
+      uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
 
-      - name: Set up Java 17 (for Android Gradle)
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+            python3-pip \
+            git \
+            zip \
+            unzip \
+            autoconf \
+            libtool \
+            pkg-config \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            libffi-dev \
+            libssl-dev
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            git zip unzip openjdk-17-jdk \
-            autoconf automake libtool pkg-config \
-            zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 \
-            cmake libffi-dev libssl-dev \
-            build-essential ccache
-          pip install --upgrade pip
-          pip install --upgrade buildozer cython==0.29.36 virtualenv
+    - name: Install Buildozer and Cython
+      run: |
+        pip install --upgrade pip
+        pip install --upgrade cython==0.29.36
+        pip install buildozer
 
-      - name: Cache Buildozer global directory
-        uses: actions/cache@v4
-        with:
-          path: ~/.buildozer
-          key: buildozer-global-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            buildozer-global-
+    - name: Build with Buildozer
+      run: |
+        buildozer -v android debug
 
-      - name: Cache Buildozer local directory
-        uses: actions/cache@v4
-        with:
-          path: .buildozer
-          key: buildozer-local-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            buildozer-local-
-
-      - name: Build APK with Buildozer
-        run: |
-          export ANDROID_HOME=$HOME/.buildozer/android/platform/android-sdk
-          export ANDROID_SDK_ROOT=$ANDROID_HOME
-          buildozer -v android debug
-
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: TechVaultDZ-debug-apk
-          path: bin/*.apk
-          if-no-files-found: error
-
-      - name: Upload build logs (on failure)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: buildozer-logs
-          path: .buildozer/android/platform/build-*/build.log
-          if-no-files-found: ignore
+    - name: Upload APK Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: package-apk
+        path: bin/*.apk
