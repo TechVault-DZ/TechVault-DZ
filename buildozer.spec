@@ -7,11 +7,12 @@ source.include_exts = py,png,jpg,kv,atlas,ttf
 source.exclude_dirs = bin, .buildozer, venv, __pycache__, .git
 source.exclude_patterns = private_key.pem, *.keystore
 
+version = 1.0.0
+
 icon.filename = %(source.dir)s/logo.png
 presplash.filename = %(source.dir)s/presplash.png
 presplash.color = #0F172A
 
-# المتطلبات المستقرة والمتوافقة مع مكتبات التطبيق (arabic_reshaper, bidi, pillow, urllib إلخ)
 requirements = python3,hostpython3,kivy==2.3.0,pillow,arabic-reshaper,python-bidi,certifi,urllib3
 
 orientation = portrait
@@ -24,13 +25,11 @@ android.ndk_api = 24
 android.archs = arm64-v8a
 android.accept_sdk_license = True
 
-# الصلاحيات المطلوبة للإنترنت (GitHub API والترجمة) وقراءة التخزين لاستعراض الصور
 android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE
 
 android.allow_backup = False
 android.logcat_filters = *:S python:D
 
-# نسخة p4a المستقرة
 p4a.branch = v2024.01.21
 
 [buildozer]
