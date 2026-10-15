@@ -23,30 +23,30 @@
 
     <!-- Header -->
     <header class="sticky top-0 z-50 backdrop-blur-md bg-white/80 dark:bg-gray-900/80 border-b border-gray-200 dark:border-gray-800">
-        <div class="max-w-6xl mx-auto px-4 h-20 flex items-center justify-between">
+        <div class="max-w-6xl mx-auto px-2 sm:px-4 h-16 sm:h-20 flex items-center justify-between gap-2">
             
             <!-- Logo & Brand Image Integration -->
-            <div class="flex items-center gap-3 cursor-pointer group" onclick="window.scrollTo({top: 0, behavior: 'smooth'})">
-                <img src="logo.png" alt="TechVault DZ Logo" class="h-12 w-auto object-contain rounded-xl shadow-sm group-hover:scale-105 transition-transform duration-300" onerror="this.onerror=null; this.src='https://via.placeholder.com/150?text=TechVault+DZ';">
-                <div>
-                    <div class="flex items-center gap-2">
-                        <h1 class="font-bold text-xl tracking-tight text-emerald-800 dark:text-emerald-400" data-i18n="siteTitle">TechVault</h1>
-                        <span class="text-xs bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300 px-2 py-0.5 rounded-full font-bold">DZ 🇩🇿</span>
+            <div class="flex items-center gap-2 cursor-pointer group min-w-0" onclick="window.scrollTo({top: 0, behavior: 'smooth'})">
+                <img src="logo.png" alt="TechVault DZ Logo" class="h-9 sm:h-12 w-auto object-contain rounded-xl shadow-sm group-hover:scale-105 transition-transform duration-300 flex-shrink-0" onerror="this.onerror=null; this.src='https://via.placeholder.com/150?text=TechVault+DZ';">
+                <div class="min-w-0 truncate">
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                        <h1 class="font-bold text-base sm:text-xl tracking-tight text-emerald-800 dark:text-emerald-400 truncate" data-i18n="siteTitle">TechVault</h1>
+                        <span class="text-[10px] sm:text-xs bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300 px-1.5 py-0.5 rounded-full font-bold">DZ 🇩🇿</span>
                     </div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400" data-i18n="siteSubtitle">الخزنة الجزائرية للبرمجيات والتطبيقات</p>
+                    <p class="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 truncate" data-i18n="siteSubtitle">الخزنة الجزائرية للبرمجيات والتطبيقات</p>
                 </div>
             </div>
 
             <!-- Controls (Language & Theme) -->
-            <div class="flex items-center gap-3">
-                <select id="langSelect" onchange="changeLanguage(this.value)" class="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-xl px-3 py-1.5 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 text-gray-800 dark:text-gray-200">
+            <div class="flex items-center gap-2 flex-shrink-0">
+                <select id="langSelect" onchange="changeLanguage(this.value)" class="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg sm:rounded-xl px-2 sm:px-3 py-1 text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 text-gray-800 dark:text-gray-200">
                     <option value="ar">العربية 🇩🇿</option>
                     <option value="fr">Français</option>
                     <option value="en">English</option>
                 </select>
 
-                <button onclick="toggleTheme()" class="w-10 h-10 rounded-xl bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-700 transition">
-                    <i id="themeIcon" class="fa-solid fa-moon text-sm text-gray-600 dark:text-gray-400"></i>
+                <button onclick="toggleTheme()" class="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-700 transition flex-shrink-0">
+                    <i id="themeIcon" class="fa-solid fa-moon text-xs sm:text-sm text-gray-600 dark:text-gray-400"></i>
                 </button>
             </div>
         </div>
@@ -181,18 +181,18 @@
             const icon = document.getElementById('themeIcon');
             if (html.classList.contains('dark')) {
                 html.classList.remove('dark');
-                icon.className = "fa-solid fa-moon text-sm text-gray-600";
+                icon.className = "fa-solid fa-moon text-xs sm:text-sm text-gray-600";
                 localStorage.setItem('theme', 'light');
             } else {
                 html.classList.add('dark');
-                icon.className = "fa-solid fa-sun text-sm text-yellow-400";
+                icon.className = "fa-solid fa-sun text-xs sm:text-sm text-yellow-400";
                 localStorage.setItem('theme', 'dark');
             }
         }
 
         if (localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.classList.add('dark');
-            document.getElementById('themeIcon').className = "fa-solid fa-sun text-sm text-yellow-400";
+            document.getElementById('themeIcon').className = "fa-solid fa-sun text-xs sm:text-sm text-yellow-400";
         }
 
         function setCategory(cat) {
