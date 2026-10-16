@@ -243,84 +243,105 @@ def open_all_files_settings():
 
 # ============ URI → path ============
 def _uri_to_path(uri):
+    """يحوّل URI مختاراً إلى مسار ملف قابل للقراءة (بنسخه لمجلد الكاش).
+    يسجّل سبب أي فشل في _PICKER_STATE["error"] ليظهر للمستخدم."""
+    errors = []
     try:
-        from jnius import autoclass
-        Build = autoclass('android.os.Build')
-        PythonActivity = autoclass('org.kivy.android.PythonActivity')
-        context = PythonActivity.mActivity
+        if uri is None:
+            _PICKER_STATE["error"] = "الاختيار لم يرجع رابط ملف"
+            return None
+        path = _copy_uri_to_cache(uri, errors)
+        if path:
+            return path
+
+        # بدائل: مسار مباشر إن كان مقروءاً فعلاً
         try:
-            ContentResolver = context.getContentResolver()
-            cursor = ContentResolver.query(uri, None, None, None, None)
-            if cursor is not None:
-                try:
-                    data_idx = cursor.getColumnIndex("_data")
-                    if data_idx >= 0 and cursor.moveToFirst():
-                        path = cursor.getString(data_idx)
-                        if path and os.path.exists(path) and os.access(path, os.R_OK):
-                            return path
-                finally:
-                    cursor.close()
+            from jnius import autoclass
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            context = PythonActivity.mActivity
+            DocumentsContract = autoclass('android.provider.DocumentsContract')
+            if DocumentsContract.isDocumentUri(context, uri):
+                doc_id = str(DocumentsContract.getDocumentId(uri))
+                if doc_id.startswith("raw:"):
+                    cand = doc_id[4:]
+                elif ":" in doc_id:
+                    cand = "/storage/emulated/0/" + doc_id.split(":", 1)[1]
+                else:
+                    cand = ""
+                if cand and os.path.isfile(cand):
+                    with open(cand, "rb") as f:
+                        f.read(1)
+                    return cand
         except Exception as e:
-            _debug_log(f"_data query error: {e}")
-
-        if Build.VERSION.SDK_INT >= 19:
-            try:
-                DocumentsContract = autoclass('android.provider.DocumentsContract')
-                if DocumentsContract.isDocumentUri(context, uri):
-                    doc_id = DocumentsContract.getDocumentId(uri)
-                    if ":" in doc_id:
-                        _, rel_path = doc_id.split(":", 1)
-                        candidate = "/storage/emulated/0/" + rel_path
-                        if os.path.exists(candidate) and os.access(candidate, os.R_OK):
-                            return candidate
-            except Exception as e:
-                _debug_log(f"DocumentsContract error: {e}")
-
-        return _copy_uri_to_cache(uri)
+            errors.append(f"path:{type(e).__name__}")
+            _debug_log(f"direct path error: {e}")
     except Exception as e:
+        errors.append(f"outer:{type(e).__name__}:{str(e)[:30]}")
         _debug_log(f"uri_to_path error: {e}")
-        return None
+
+    _PICKER_STATE["error"] = "تعذّر قراءة الملف | " + " | ".join(errors)[:90]
+    return None
 
 
-def _copy_uri_to_cache(uri):
+def _copy_uri_to_cache(uri, errors=None):
+    if errors is None:
+        errors = []
     try:
         from jnius import autoclass
         PythonActivity = autoclass('org.kivy.android.PythonActivity')
         context = PythonActivity.mActivity
         ContentResolver = context.getContentResolver()
+    except Exception as e:
+        errors.append(f"ctx:{type(e).__name__}:{str(e)[:30]}")
+        _debug_log(f"copy ctx error: {e}")
+        return None
 
-        name = "picked_file"
+    # اسم الملف
+    name = ""
+    try:
+        cursor = ContentResolver.query(uri, None, None, None, None)
+        if cursor is not None:
+            try:
+                idx = cursor.getColumnIndex("_display_name")
+                if idx >= 0 and cursor.moveToFirst():
+                    name = cursor.getString(idx) or ""
+            finally:
+                cursor.close()
+    except Exception as e:
+        _debug_log(f"name query failed: {e}")
+    if not name:
         try:
-            cursor = ContentResolver.query(uri, None, None, None, None)
-            if cursor is not None:
-                try:
-                    idx = cursor.getColumnIndex("_display_name")
-                    if idx >= 0 and cursor.moveToFirst():
-                        n = cursor.getString(idx)
-                        if n:
-                            name = n
-                finally:
-                    cursor.close()
+            seg = uri.getLastPathSegment()
+            if seg:
+                name = str(seg).split("/")[-1].split(":")[-1]
         except Exception:
             pass
+    name = re.sub(r'[\\/:*?"<>|]', "_", str(name or "picked_file")) or "picked_file"
 
-        if name == "picked_file":
-            try:
-                seg = uri.getLastPathSegment()
-                if seg:
-                    name = str(seg).split("/")[-1].split(":")[-1] or name
-            except Exception:
-                pass
-        name = re.sub(r'[\\/:*?"<>|]', "_", name)
+    # مجلد الوجهة
+    dest_dirs = []
+    try:
+        dest_dirs.append(str(context.getCacheDir().getAbsolutePath()))
+    except Exception as e:
+        errors.append(f"cache:{type(e).__name__}")
+    try:
+        dest_dirs.append(App.get_running_app().user_data_dir)
+    except Exception:
+        pass
+    if not dest_dirs:
+        errors.append("no dest dir")
+        return None
 
-        cache_dir = context.getCacheDir().getAbsolutePath()
-        dest = os.path.join(cache_dir, name)
-
-        # الطريقة الموثوقة: قراءة الملف عبر File Descriptor من بايثون مباشرة
-        # (تجنّب مشكلة bytearray في pyjnius التي تنتج ملفاً فارغاً/تالفاً)
+    for d in dest_dirs:
+        dest = os.path.join(d, name)
         try:
-            pfd = ContentResolver.openFileDescriptor(uri, "r")
-            if pfd is not None:
+            os.makedirs(d, exist_ok=True)
+
+            # 1) File Descriptor (الأكثر موثوقية)
+            try:
+                pfd = ContentResolver.openFileDescriptor(uri, "r")
+                if pfd is None:
+                    raise IOError("openFileDescriptor returned null")
                 fd = pfd.detachFd()
                 with os.fdopen(fd, "rb") as src, open(dest, "wb") as dst:
                     while True:
@@ -328,30 +349,62 @@ def _copy_uri_to_cache(uri):
                         if not chunk:
                             break
                         dst.write(chunk)
-                _debug_log(f"Copied URI via fd -> {dest}")
-                return dest
-        except Exception as e:
-            _debug_log(f"fd copy failed: {e}")
+                if os.path.getsize(dest) > 0:
+                    _debug_log(f"Copied via fd -> {dest}")
+                    return dest
+                errors.append("fd:empty")
+            except Exception as e:
+                errors.append(f"fd:{type(e).__name__}:{str(e)[:30]}")
+                _debug_log(f"fd copy failed: {e}")
 
-        # بديل: قراءة بايت بايت عبر InputStream
-        input_stream = ContentResolver.openInputStream(uri)
-        if input_stream is None:
-            return None
-        try:
-            with open(dest, "wb") as dst:
-                while True:
-                    b = input_stream.read()
-                    if b < 0:
-                        break
-                    dst.write(bytes([b]))
-        finally:
-            input_stream.close()
-        _debug_log(f"Copied URI via stream -> {dest}")
-        return dest
-    except Exception as e:
-        _debug_log(f"copy to cache error: {e}")
-        _PICKER_STATE["error"] = f"تعذّر قراءة الملف: {str(e)[:40]}"
-        return None
+            # 2) AssetFileDescriptor
+            try:
+                afd = ContentResolver.openAssetFileDescriptor(uri, "r")
+                if afd is None:
+                    raise IOError("openAssetFileDescriptor returned null")
+                fd = afd.getParcelFileDescriptor().detachFd()
+                with os.fdopen(fd, "rb") as src, open(dest, "wb") as dst:
+                    while True:
+                        chunk = src.read(65536)
+                        if not chunk:
+                            break
+                        dst.write(chunk)
+                if os.path.getsize(dest) > 0:
+                    _debug_log(f"Copied via afd -> {dest}")
+                    return dest
+                errors.append("afd:empty")
+            except Exception as e:
+                errors.append(f"afd:{type(e).__name__}:{str(e)[:30]}")
+                _debug_log(f"afd copy failed: {e}")
+
+            # 3) InputStream بايت بايت (بطيء لكنه بديل أخير)
+            try:
+                input_stream = ContentResolver.openInputStream(uri)
+                if input_stream is None:
+                    raise IOError("openInputStream returned null")
+                try:
+                    out = bytearray()
+                    while True:
+                        b = input_stream.read()
+                        if b < 0:
+                            break
+                        out.append(b)
+                        if len(out) > 8 * 1024 * 1024:
+                            raise IOError("file too large for slow path")
+                finally:
+                    input_stream.close()
+                with open(dest, "wb") as dst:
+                    dst.write(bytes(out))
+                if os.path.getsize(dest) > 0:
+                    _debug_log(f"Copied via stream -> {dest}")
+                    return dest
+                errors.append("stream:empty")
+            except Exception as e:
+                errors.append(f"stream:{type(e).__name__}:{str(e)[:30]}")
+                _debug_log(f"stream copy failed: {e}")
+        except Exception as e:
+            errors.append(f"dest:{type(e).__name__}:{str(e)[:30]}")
+    return None
 
 
 # ============ كشف بيئة Intent ============
