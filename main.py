@@ -31,7 +31,7 @@ try:
     SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
     print("[TechVault] SSL: certifi loaded OK")
 except Exception as e:
-    print(f"[TechVault] SSL: certifi failed ({e}), using unverified fallback")
+    print(f"[TechVault] SSL fallback: {e}")
     SSL_CONTEXT = ssl._create_unverified_context()
 
 Window.clearcolor = (0.95, 0.97, 0.95, 1)
@@ -44,8 +44,9 @@ try:
 except ImportError:
     HAS_BIDI = False
 
-# ============ مسار الخط ============
+# ============ مسار الخط (ديناميكي) ============
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 def _find_font():
     for name in ("arabic.ttf", "Cairo-Regular.ttf", "Amiri-Regular.ttf"):
@@ -54,9 +55,19 @@ def _find_font():
             return p
     return None
 
+
 FONT_PATH = _find_font()
 print(f"[TechVault] BASE_DIR = {BASE_DIR}")
 print(f"[TechVault] FONT_PATH = {FONT_PATH}")
+
+
+def _user_index_path():
+    """مسار index.html المحفوظ محلياً (يبقى بعد إغلاق التطبيق)."""
+    try:
+        data_dir = App.get_running_app().user_data_dir
+    except Exception:
+        data_dir = BASE_DIR
+    return os.path.join(data_dir, "index.html")
 
 
 def format_ar(text):
@@ -73,18 +84,60 @@ def format_ar(text):
     return text_str
 
 
+# ============ ترجمة: Google أولاً ثم MyMemory ============
 def translate_text(text, target_lang):
     if not text or not text.strip():
         return ""
+
+    # ====== 1) Google Translate (غير رسمي، مجاني) ======
     try:
-        url = f"https://api.mymemory.translated.net/get?q={urllib.parse.quote(text)}&langpair=ar|{target_lang}"
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=5, context=SSL_CONTEXT) as response:
-            data = json.loads(response.read().decode("utf-8"))
-            if data.get("responseStatus") == 200:
-                return data["responseData"]["translatedText"]
+        url = (
+            "https://translate.googleapis.com/translate_a/single"
+            f"?client=gtx&sl=ar&tl={target_lang}&dt=t"
+            f"&q={urllib.parse.quote(text)}"
+        )
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Linux; Android 10)",
+                "Accept": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=6, context=SSL_CONTEXT) as r:
+            data = json.loads(r.read().decode("utf-8"))
+
+        if data and isinstance(data, list) and data[0]:
+            parts = []
+            for seg in data[0]:
+                if seg and isinstance(seg, list) and seg[0]:
+                    parts.append(seg[0])
+            result = "".join(parts).strip()
+            if result:
+                print(f"[TechVault] Google OK: {result[:50]}")
+                return result
     except Exception as e:
-        print(f"[TechVault] translate error: {e}")
+        print(f"[TechVault] Google failed: {e}")
+
+    # ====== 2) MyMemory (احتياطي) ======
+    try:
+        url = (
+            f"https://api.mymemory.translated.net/get"
+            f"?q={urllib.parse.quote(text)}&langpair=ar|{target_lang}"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=6, context=SSL_CONTEXT) as r:
+            data = json.loads(r.read().decode("utf-8"))
+
+        status = data.get("responseStatus")
+        if str(status) == "200":
+            result = data.get("responseData", {}).get("translatedText", "").strip()
+            if result:
+                print(f"[TechVault] MyMemory OK: {result[:50]}")
+                return result
+    except Exception as e:
+        print(f"[TechVault] MyMemory failed: {e}")
+
+    print("[TechVault] All translation services failed")
     return ""
 
 
@@ -113,7 +166,7 @@ class SplashScreen(Screen):
 
         layout.add_widget(
             Label(
-                text=format_ar("الخزنة الجزائرية للبرمجيات - DZ"),
+                text=format_ar("الخزنة الجزائرية للبرمجيات"),
                 font_size=sp(14),
                 color=(0.3, 0.3, 0.3, 1),
                 size_hint_y=None,
@@ -297,59 +350,101 @@ class ProductsScreen(Screen):
     def __init__(self, **kwargs):
         super(ProductsScreen, self).__init__(**kwargs)
         self.products = []
-        self.html_path = os.path.join(BASE_DIR, "index.html")
+        self.bundled_html_path = os.path.join(BASE_DIR, "index.html")
         self.full_image_paths = {}
 
-        root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(10))
-        top_bar = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(4))
+        user_html = _user_index_path()
+        if os.path.exists(user_html):
+            self.html_path = user_html
+        else:
+            self.html_path = self.bundled_html_path
+
+        root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
+
+        top_bar = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(4))
 
         btn_back = Button(
-            text=format_ar("الرئيسية"),
-            size_hint_x=0.2,
+            text=format_ar("رئيسية"),
+            size_hint_x=0.20,
             background_color=(0.25, 0.25, 0.25, 1),
             color=(1, 1, 1, 1),
+            font_size=sp(12),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_back.bind(on_press=lambda x: setattr(self.manager, "current", "home"))
 
-        btn_load = Button(
-            text=format_ar("تحميل"),
-            size_hint_x=0.2,
+        btn_reload = Button(
+            text=format_ar("إعادة تحميل"),
+            size_hint_x=0.26,
             background_color=(0.15, 0.35, 0.55, 1),
             color=(1, 1, 1, 1),
+            font_size=sp(12),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
-        btn_load.bind(on_press=self.load_html)
+        btn_reload.bind(on_press=self.load_html)
+
+        btn_open = Button(
+            text=format_ar("فتح ملف"),
+            size_hint_x=0.26,
+            background_color=(0.8, 0.5, 0.1, 1),
+            color=(1, 1, 1, 1),
+            font_size=sp(12),
+            bold=True,
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        btn_open.bind(on_press=lambda x: self.open_html_chooser_popup())
+
+        btn_from_gh = Button(
+            text=format_ar("من GitHub"),
+            size_hint_x=0.28,
+            background_color=(0.1, 0.1, 0.1, 1),
+            color=(1, 1, 1, 1),
+            font_size=sp(12),
+            bold=True,
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        btn_from_gh.bind(on_press=lambda x: self.download_html_from_github())
+
+        top_bar.add_widget(btn_back)
+        top_bar.add_widget(btn_reload)
+        top_bar.add_widget(btn_open)
+        top_bar.add_widget(btn_from_gh)
+        root.add_widget(top_bar)
+
+        action_bar = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(4))
 
         btn_add = Button(
-            text=format_ar("إضافة"),
-            size_hint_x=0.2,
+            text=format_ar("إضافة منتج"),
+            size_hint_x=0.35,
             background_color=(0.05, 0.58, 0.38, 1),
             color=(1, 1, 1, 1),
+            font_size=sp(13),
+            bold=True,
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_add.bind(on_press=lambda x: self.open_product_form())
 
         btn_save = Button(
-            text=format_ar("حفظ ورفع"),
-            size_hint_x=0.4,
+            text=format_ar("حفظ ورفع إلى GitHub"),
+            size_hint_x=0.65,
             background_color=(0.7, 0.2, 0.2, 1),
             color=(1, 1, 1, 1),
+            font_size=sp(13),
+            bold=True,
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_save.bind(on_press=self.save_and_push)
 
-        top_bar.add_widget(btn_back)
-        top_bar.add_widget(btn_load)
-        top_bar.add_widget(btn_add)
-        top_bar.add_widget(btn_save)
-        root.add_widget(top_bar)
+        action_bar.add_widget(btn_add)
+        action_bar.add_widget(btn_save)
+        root.add_widget(action_bar)
 
         self.status_label = Label(
             text=format_ar("إدارة منتجات TechVault DZ"),
             size_hint_y=None,
-            height=dp(30),
+            height=dp(28),
             color=(0.2, 0.2, 0.2, 1),
+            font_size=sp(12),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         root.add_widget(self.status_label)
@@ -365,6 +460,117 @@ class ProductsScreen(Screen):
         if os.path.exists(self.html_path):
             self.load_html(None)
 
+    # ---------- كشف موضع مصفوفة المنتجات ----------
+    def _find_products_array(self, content):
+        m = re.search(r"const\s+products\s*=\s*", content)
+        if not m:
+            return None
+        start = m.end()
+        while start < len(content) and content[start] in " \t\r\n":
+            start += 1
+        if start >= len(content) or content[start] != "[":
+            return None
+
+        depth = 0
+        in_str = None
+        esc = False
+        i = start
+        while i < len(content):
+            c = content[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == in_str:
+                    in_str = None
+            else:
+                if c == "'" or c == '"':
+                    in_str = c
+                elif c in "[{":
+                    depth += 1
+                elif c in "]}":
+                    depth -= 1
+                    if depth == 0 and c == "]":
+                        return (start, i + 1)
+            i += 1
+        return None
+
+    def _replace_products_array(self, content, new_json_str):
+        pos = self._find_products_array(content)
+        if pos is None:
+            return None
+        start, end = pos
+        return content[:start] + new_json_str + content[end:]
+
+    # ---------- تحويل JS object literal إلى JSON ----------
+    def js_to_json(self, js_str):
+        out = []
+        i = 0
+        n = len(js_str)
+        in_str = None
+        esc = False
+
+        while i < n:
+            c = js_str[i]
+
+            if in_str:
+                if esc:
+                    out.append(c)
+                    esc = False
+                elif c == "\\":
+                    out.append(c)
+                    esc = True
+                elif c == in_str:
+                    out.append('"')
+                    in_str = None
+                elif c == '"':
+                    out.append('\\"')
+                else:
+                    out.append(c)
+                i += 1
+                continue
+
+            if c == "'" or c == '"':
+                in_str = c
+                out.append('"')
+            elif c == ",":
+                j = i + 1
+                while j < n and js_str[j] in " \t\r\n":
+                    j += 1
+                if j < n and js_str[j] in "]}":
+                    pass
+                else:
+                    out.append(",")
+            elif c == "/" and i + 1 < n and js_str[i + 1] == "/":
+                j = js_str.find("\n", i)
+                if j == -1:
+                    break
+                i = j
+                continue
+            elif c == "/" and i + 1 < n and js_str[i + 1] == "*":
+                j = js_str.find("*/", i + 2)
+                if j == -1:
+                    break
+                i = j + 1
+                continue
+            else:
+                out.append(c)
+
+            i += 1
+
+        result = "".join(out)
+        result = re.sub(
+            r"([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:",
+            r'\1"\2":',
+            result,
+        )
+        return result
+
+    def json_to_js(self, py_list):
+        return json.dumps(py_list, ensure_ascii=False, indent=4)
+
+    # ---------- تحميل HTML ----------
     def load_html(self, instance):
         if not os.path.exists(self.html_path):
             self.status_label.text = format_ar("خطأ: index.html غير موجود!")
@@ -372,23 +578,34 @@ class ProductsScreen(Screen):
         try:
             with open(self.html_path, "r", encoding="utf-8") as f:
                 content = f.read()
-            match = re.search(r"const products = (\[.*?\]);", content, re.DOTALL)
-            if match:
-                self.products = json.loads(self.js_to_json(match.group(1)))
-                self.status_label.text = format_ar(f"تم تحميل {len(self.products)} منتج بنجاح.")
+
+            pos = self._find_products_array(content)
+            if pos is None:
+                self.status_label.text = format_ar(
+                    "لم أجد 'const products = [...]' في index.html"
+                )
+                self.products = []
                 self.refresh_products_list()
-            else:
-                self.status_label.text = format_ar("خطأ في قراءة بيانات المنتجات.")
+                return
+
+            start, end = pos
+            js_arr = content[start:end]
+            json_str = self.js_to_json(js_arr)
+            self.products = json.loads(json_str)
+
+            self.status_label.text = format_ar(
+                f"تم تحميل {len(self.products)} منتج بنجاح."
+            )
+            self.refresh_products_list()
+
+        except json.JSONDecodeError as e:
+            self.status_label.text = format_ar(f"خطأ JSON: {str(e)[:40]}")
+            print(f"[TechVault] JSON error: {e}")
+            self.products = []
+            self.refresh_products_list()
         except Exception as e:
-            self.status_label.text = format_ar(f"خطأ: {str(e)[:30]}")
-
-    def js_to_json(self, js_str):
-        s = js_str
-        s = re.sub(r"([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:", r'\1"\2":', s)
-        return s.replace("'", '"')
-
-    def json_to_js(self, py_list):
-        return json.dumps(py_list, ensure_ascii=False, indent=4)
+            self.status_label.text = format_ar(f"خطأ: {str(e)[:40]}")
+            print(f"[TechVault] load_html error: {e}")
 
     def refresh_products_list(self):
         self.products_layout.clear_widgets()
@@ -437,6 +654,142 @@ class ProductsScreen(Screen):
             self.refresh_products_list()
             self.status_label.text = format_ar("تم الحذف. اضغط 'حفظ' في الأعلى.")
 
+    # ---------- نسخ الملف المختار إلى user_data ----------
+    def _save_local_copy(self, src_path):
+        try:
+            dst = _user_index_path()
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with open(src_path, "r", encoding="utf-8") as f:
+                data = f.read()
+            with open(dst, "w", encoding="utf-8") as f:
+                f.write(data)
+            self.html_path = dst
+            return True
+        except Exception as e:
+            print(f"[TechVault] save local copy error: {e}")
+            return False
+
+    # ---------- نافذة اختيار ملف HTML ----------
+    def open_html_chooser_popup(self):
+        content = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(10))
+        with content.canvas.before:
+            Color(0.12, 0.15, 0.13, 1)
+            self.bg_html_chooser = Rectangle(size=content.size, pos=content.pos)
+        content.bind(
+            size=lambda s, w: setattr(self.bg_html_chooser, "size", s.size),
+            pos=lambda s, w: setattr(self.bg_html_chooser, "pos", s.pos),
+        )
+
+        initial_path = "/sdcard" if os.path.exists("/sdcard") else os.path.expanduser("~")
+        file_chooser = FileChooserIconView(
+            filters=["*.html", "*.htm"], path=initial_path, size_hint=(1, 1)
+        )
+        content.add_widget(file_chooser)
+
+        btn_layout = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
+        btn_select = Button(
+            text=format_ar("فتح هذا الملف"),
+            background_color=(0.05, 0.58, 0.38, 1),
+            color=(1, 1, 1, 1),
+            bold=True,
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        btn_cancel = Button(
+            text=format_ar("إلغاء"),
+            background_color=(0.7, 0.2, 0.2, 1),
+            color=(1, 1, 1, 1),
+            bold=True,
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+
+        popup = Popup(
+            title=format_ar("اختر ملف index.html"),
+            title_font=FONT_PATH if FONT_PATH else "Roboto",
+            title_size=sp(15),
+            title_align="center",
+            content=content,
+            size_hint=(0.94, 0.92),
+            separator_color=(0.8, 0.5, 0.1, 1),
+        )
+
+        def on_select(instance):
+            if file_chooser.selection:
+                chosen = file_chooser.selection[0]
+                if self._save_local_copy(chosen):
+                    self.status_label.text = format_ar(
+                        f"تم فتح: {os.path.basename(chosen)}"
+                    )
+                    self.load_html(None)
+                else:
+                    self.status_label.text = format_ar("فشل نسخ الملف المختار.")
+            popup.dismiss()
+
+        btn_select.bind(on_press=on_select)
+        btn_cancel.bind(on_press=popup.dismiss)
+        btn_layout.add_widget(btn_select)
+        btn_layout.add_widget(btn_cancel)
+        content.add_widget(btn_layout)
+        popup.open()
+
+    # ---------- جلب index.html من GitHub ----------
+    def download_html_from_github(self):
+        cfg = self.load_gh_config()
+        user = cfg.get("user", "").strip()
+        repo = cfg.get("repo", "").strip()
+
+        if not user or not repo:
+            self.status_label.text = format_ar(
+                "حدّد بيانات GitHub أولاً من الإعدادات."
+            )
+            return
+
+        self.status_label.text = format_ar("جاري جلب index.html من GitHub...")
+
+        def bg():
+            try:
+                raw_url = f"https://raw.githubusercontent.com/{user}/{repo}/main/index.html"
+                req = urllib.request.Request(
+                    raw_url, headers={"User-Agent": "TechVault-DZ-App"}
+                )
+                with urllib.request.urlopen(req, timeout=10, context=SSL_CONTEXT) as r:
+                    data = r.read().decode("utf-8")
+
+                dst = _user_index_path()
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                with open(dst, "w", encoding="utf-8") as f:
+                    f.write(data)
+
+                def done(dt):
+                    self.html_path = dst
+                    self.load_html(None)
+                    self.status_label.text = format_ar(
+                        "تم جلب index.html من GitHub بنجاح!"
+                    )
+
+                Clock.schedule_once(done, 0)
+            except Exception as e:
+                print(f"[TechVault] download html error: {e}")
+
+                def failed(dt):
+                    self.status_label.text = format_ar(f"فشل الجلب: {str(e)[:40]}")
+
+                Clock.schedule_once(failed, 0)
+
+        threading.Thread(target=bg, daemon=True).start()
+
+    # ---------- الرجوع للنسخة الأصلية ----------
+    def reset_to_bundled_html(self):
+        try:
+            user_html = _user_index_path()
+            if os.path.exists(user_html):
+                os.remove(user_html)
+            self.html_path = self.bundled_html_path
+            self.load_html(None)
+            self.status_label.text = format_ar("تم الرجوع للنسخة الأصلية.")
+        except Exception as e:
+            self.status_label.text = format_ar(f"خطأ: {str(e)[:30]}")
+
+    # ---------- نافذة اختيار صورة المنتج ----------
     def open_file_chooser_popup(self, text_input_field):
         content = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(10))
         with content.canvas.before:
@@ -495,6 +848,7 @@ class ProductsScreen(Screen):
         content.add_widget(btn_layout)
         popup.open()
 
+    # ---------- نموذج إضافة/تعديل منتج ----------
     def open_product_form(self, idx=None):
         is_edit = idx is not None
         p = (
@@ -506,6 +860,7 @@ class ProductsScreen(Screen):
                 "icon": "fa-solid fa-code",
                 "color": "from-blue-500 to-indigo-600",
                 "image": "",
+                "download_url": "",
                 "name": {"ar": "", "fr": "", "en": ""},
                 "desc": {"ar": "", "fr": "", "en": ""},
                 "version": "v1.0.0",
@@ -553,6 +908,7 @@ class ProductsScreen(Screen):
             ("icon", "أيقونة FontAwesome", p.get("icon", "")),
             ("color", "لون Tailwind", p.get("color", "")),
             ("image", "رابط أو مسار الصورة", p.get("image", "")),
+            ("download_url", "رابط التحميل (Download URL)", p.get("download_url", "")),
             ("name_ar", "الاسم (عربي)", p.get("name", {}).get("ar", "")),
             ("name_fr", "الاسم (فرنسي)", p.get("name", {}).get("fr", "")),
             ("name_en", "الاسم (إنجليزي)", p.get("name", {}).get("en", "")),
@@ -623,30 +979,45 @@ class ProductsScreen(Screen):
             self.inputs[key] = ti
             form_layout.add_widget(ti)
 
+        # ============ الترجمة: تحديث الواجهة من main thread ============
         def run_translation(instance):
             ar_n = self.inputs["name_ar"].text.strip()
             ar_d = self.inputs["desc_ar"].text.strip()
             if not ar_n and not ar_d:
                 self.status_label.text = format_ar("أدخل النص بالعربية أولاً للترجمة.")
                 return
-            self.status_label.text = format_ar("جاري الترجمة الآلية في الخلفية...")
+
+            btn_translate.disabled = True
+            self.status_label.text = format_ar("جاري الترجمة...")
 
             def background_task():
                 tr_name_fr = translate_text(ar_n, "fr") if ar_n else ""
                 tr_name_en = translate_text(ar_n, "en") if ar_n else ""
                 tr_desc_fr = translate_text(ar_d, "fr") if ar_d else ""
                 tr_desc_en = translate_text(ar_d, "en") if ar_d else ""
-                if tr_name_fr:
-                    self.inputs["name_fr"].text = tr_name_fr
-                if tr_name_en:
-                    self.inputs["name_en"].text = tr_name_en
-                if tr_desc_fr:
-                    self.inputs["desc_fr"].text = tr_desc_fr
-                if tr_desc_en:
-                    self.inputs["desc_en"].text = tr_desc_en
-                self.status_label.text = format_ar("تمت الترجمة الآلية بنجاح!")
 
-            threading.Thread(target=background_task).start()
+                def update_ui(dt):
+                    if tr_name_fr:
+                        self.inputs["name_fr"].text = tr_name_fr
+                    if tr_name_en:
+                        self.inputs["name_en"].text = tr_name_en
+                    if tr_desc_fr:
+                        self.inputs["desc_fr"].text = tr_desc_fr
+                    if tr_desc_en:
+                        self.inputs["desc_en"].text = tr_desc_en
+
+                    got_any = any([tr_name_fr, tr_name_en, tr_desc_fr, tr_desc_en])
+                    if got_any:
+                        self.status_label.text = format_ar("تمت الترجمة الآلية بنجاح!")
+                    else:
+                        self.status_label.text = format_ar(
+                            "فشلت الترجمة. تحقق من الإنترنت."
+                        )
+                    btn_translate.disabled = False
+
+                Clock.schedule_once(update_ui, 0)
+
+            threading.Thread(target=background_task, daemon=True).start()
 
         btn_translate.bind(on_press=run_translation)
         scroll.add_widget(form_layout)
@@ -682,6 +1053,7 @@ class ProductsScreen(Screen):
                     "icon": self.inputs["icon"].text.strip(),
                     "color": self.inputs["color"].text.strip(),
                     "image": os.path.basename(self.inputs["image"].text.strip()),
+                    "download_url": self.inputs["download_url"].text.strip(),
                     "name": {
                         "ar": self.inputs["name_ar"].text.strip(),
                         "fr": self.inputs["name_fr"].text.strip(),
@@ -713,22 +1085,29 @@ class ProductsScreen(Screen):
         content.add_widget(btn_box)
         popup.open()
 
+    # ---------- حفظ HTML محلياً ----------
     def save_html(self, instance):
-        if not os.path.exists(self.html_path):
-            return
         try:
             with open(self.html_path, "r", encoding="utf-8") as f:
                 content = f.read()
-            new_block = f"const products = {self.json_to_js(self.products)};"
-            new_content = re.sub(
-                r"const products = \[.*?\];", new_block, content, flags=re.DOTALL
-            )
+
+            new_json = self.json_to_js(self.products)
+            new_content = self._replace_products_array(content, new_json)
+
+            if new_content is None:
+                self.status_label.text = format_ar(
+                    "لم أجد مصفوفة المنتجات في index.html"
+                )
+                return
+
             with open(self.html_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
             self.status_label.text = format_ar("تم حفظ index.html بنجاح!")
-        except Exception as e:
-            self.status_label.text = format_ar(f"خطأ حفظ: {str(e)[:30]}")
 
+        except Exception as e:
+            self.status_label.text = format_ar(f"خطأ حفظ: {str(e)[:40]}")
+
+    # ---------- إعدادات GitHub ----------
     def _gh_config_path(self):
         return os.path.join(App.get_running_app().user_data_dir, "github_config.json")
 
@@ -747,6 +1126,7 @@ class ProductsScreen(Screen):
         except Exception:
             pass
 
+    # ---------- حفظ ثم رفع ----------
     def save_and_push(self, instance):
         cfg = self.load_gh_config()
         if not (cfg.get("user") and cfg.get("repo") and cfg.get("token")):
@@ -761,6 +1141,7 @@ class ProductsScreen(Screen):
             lambda msg: setattr(self.status_label, "text", format_ar(msg)),
         )
 
+    # ---------- الرفع إلى GitHub ----------
     def push_to_github(self, user, repo, token, status_cb):
         def set_status(msg):
             Clock.schedule_once(lambda dt: status_cb(msg), 0)
@@ -838,6 +1219,7 @@ class ProductsScreen(Screen):
 
         threading.Thread(target=background_push, daemon=True).start()
 
+    # ---------- نافذة إعدادات GitHub ----------
     def open_github_popup(self, instance, then_push=False):
         saved_cfg = self.load_gh_config()
         content = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
@@ -933,7 +1315,7 @@ class ProductsScreen(Screen):
 
         btn_box = BoxLayout(size_hint_y=None, height=dp(45), spacing=dp(10))
         btn_push = Button(
-            text=format_ar("رفع وتحديث الموقع واللوغو"),
+            text=format_ar("حفظ البيانات"),
             background_color=(0.05, 0.58, 0.38, 1),
             color=(1, 1, 1, 1),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
@@ -945,7 +1327,7 @@ class ProductsScreen(Screen):
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
 
-        def push_action(btn):
+        def save_action(btn):
             user = ti_user.text.strip()
             repo = ti_repo.text.strip()
             token = ti_token.text.strip()
@@ -955,20 +1337,15 @@ class ProductsScreen(Screen):
                 return
 
             self.store_gh_config(user, repo, token)
-            self.save_html(None)
-            lbl_git_status.text = format_ar("جاري الرفع إلى GitHub...")
+            lbl_git_status.text = format_ar("تم حفظ البيانات بنجاح!")
+            popup.dismiss()
 
-            def on_done(msg):
-                lbl_git_status.text = format_ar(msg)
-                self.status_label.text = format_ar(msg)
-
-            self.push_to_github(user, repo, token, on_done)
-
-        btn_push.bind(on_press=push_action)
+        btn_push.bind(on_press=save_action)
         btn_cancel.bind(on_press=popup.dismiss)
         btn_box.add_widget(btn_push)
         btn_box.add_widget(btn_cancel)
         content.add_widget(btn_box)
+
         popup.open()
 
 
@@ -1073,7 +1450,7 @@ class SettingsScreen(Screen):
         )
         layout.add_widget(
             Label(
-                text=format_ar("حالة الاتصال: متصل بالخزنة المحلية - DZ"),
+                text=format_ar("حالة الاتصال: متصل بالخزنة المحلية"),
                 size_hint_y=None,
                 height=dp(25),
                 color=(0.2, 0.2, 0.2, 1),
@@ -1108,6 +1485,21 @@ class SettingsScreen(Screen):
             on_press=lambda x: self.manager.get_screen("products").open_github_popup(None)
         )
         layout.add_widget(btn_gh_settings)
+
+        btn_reset_html = Button(
+            text=format_ar("إعادة تعيين index.html للأصل"),
+            size_hint_y=None,
+            height=dp(45),
+            background_color=(0.5, 0.2, 0.5, 1),
+            color=(1, 1, 1, 1),
+            font_size=sp(14),
+            bold=True,
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        btn_reset_html.bind(
+            on_press=lambda x: self.manager.get_screen("products").reset_to_bundled_html()
+        )
+        layout.add_widget(btn_reset_html)
 
         self.msg_label = Label(
             text="",
@@ -1218,7 +1610,9 @@ class SettingsScreen(Screen):
                     self.msg_label.text = format_ar("تم تغيير كلمة المرور بنجاح!")
                     popup.dismiss()
                 else:
-                    self.msg_label.text = format_ar("كلمة المرور الجديدة لا يمكن أن تكون فارغة!")
+                    self.msg_label.text = format_ar(
+                        "كلمة المرور الجديدة لا يمكن أن تكون فارغة!"
+                    )
             else:
                 self.msg_label.text = format_ar("كلمة المرور الحالية غير صحيحة!")
 
