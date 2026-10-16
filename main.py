@@ -167,7 +167,7 @@ def open_all_files_settings():
         _debug_log(f"open all files settings error: {e}")
 
 
-# ============ URI → path / copy to cache ============
+# ============ URI → path ============
 def _uri_to_path(uri):
     try:
         from jnius import autoclass
@@ -254,15 +254,13 @@ def _copy_uri_to_cache(uri):
         return None
 
 
-# ============ ⭐ كشف بيئة التشغيل ============
+# ============ كشف بيئة Intent ============
 def _can_use_android_intent():
-    """يتحقق إذا كان التطبيق يدعم Intent (APK) أو Pydroid."""
     if _kivy_platform != "android":
         return False
     try:
         from jnius import autoclass
         autoclass('org.kivy.android.PythonActivity')
-        # محاولة الوصول لكلاس ActivityResultListener
         autoclass('org.kivy.android.PythonActivity$ActivityResultListener')
         return True
     except Exception as e:
@@ -270,12 +268,10 @@ def _can_use_android_intent():
         return False
 
 
-# ============ ⭐ منتقي بديل يعمل في Pydroid (Kivy FileChooser) ============
+# ============ منتقي Kivy العربي (Pydroid) ============
 def _pick_files_kivy_fallback(on_result, mime_type="*/*", multiple=False):
-    """منتقي بديل يعمل في Pydroid 3 و سطح المكتب."""
-    _debug_log(f"Kivy fallback picker: mime={mime_type} multiple={multiple}")
+    _debug_log(f"Kivy picker: mime={mime_type} multi={multiple}")
 
-    # مجلد البداية
     start = None
     if _kivy_platform == "android":
         for cand in ("/storage/emulated/0/Download",
@@ -288,7 +284,6 @@ def _pick_files_kivy_fallback(on_result, mime_type="*/*", multiple=False):
     if not start:
         start = os.path.expanduser("~")
 
-    # فلتر حسب النوع
     filters = []
     if "html" in mime_type:
         filters = ["*.html", "*.htm", "*.HTML", "*.HTM"]
@@ -296,82 +291,284 @@ def _pick_files_kivy_fallback(on_result, mime_type="*/*", multiple=False):
         filters = ["*.png", "*.jpg", "*.jpeg",
                    "*.PNG", "*.JPG", "*.JPEG", "*.webp"]
 
-    content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
-    content.add_widget(Label(
-        text=format_ar("اختر ملفاً"), size_hint_y=None, height=dp(32),
-        bold=True, color=(0.08, 0.45, 0.75, 1),
-        font_name=FONT_PATH if FONT_PATH else "Roboto"))
+    state = {"path": start, "selection": set()}
 
-    fc = FileChooserIconView(
-        path=start,
-        filters=filters if filters else ["*"],
-        multiselect=multiple,
-        size_hint=(1, 1),
-    )
-    content.add_widget(fc)
+    root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
 
-    btn_row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
-    btn_ok = Button(text=format_ar("تأكيد"), bold=True,
-                    background_color=(0.08, 0.45, 0.75, 1),
-                    color=(1, 1, 1, 1),
-                    font_name=FONT_PATH if FONT_PATH else "Roboto")
-    btn_cancel = Button(text=format_ar("إلغاء"),
-                        background_color=(0.75, 0.22, 0.17, 1),
-                        color=(1, 1, 1, 1),
-                        font_name=FONT_PATH if FONT_PATH else "Roboto")
-    btn_row.add_widget(btn_ok)
-    btn_row.add_widget(btn_cancel)
-    content.add_widget(btn_row)
+    # شريط علوي
+    path_bar = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(6))
+    btn_up = Button(
+        text=format_ar("⬆ أعلى"), size_hint_x=None, width=dp(80),
+        background_color=(0.08, 0.45, 0.75, 1),
+        color=(1, 1, 1, 1), bold=True,
+        font_name=FONT_PATH if FONT_PATH else "Roboto")
+    path_lbl = Label(
+        text="", color=(0.15, 0.15, 0.15, 1),
+        font_size=sp(12), halign="right", valign="middle",
+        size_hint_x=1,
+        font_name=FONT_PATH if FONT_PATH else "Roboto")
+    path_lbl.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
+    path_bar.add_widget(btn_up)
+    path_bar.add_widget(path_lbl)
+    root.add_widget(path_bar)
 
-    popup = Popup(title="", content=content, size_hint=(0.95, 0.9),
+    # قائمة الملفات
+    scroll = ScrollView(bar_width=dp(3))
+    files_box = BoxLayout(orientation="vertical", size_hint_y=None,
+                          spacing=dp(2), padding=dp(2))
+    files_box.bind(minimum_height=files_box.setter("height"))
+    scroll.add_widget(files_box)
+    root.add_widget(scroll)
+
+    # أزرار
+    bottom = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+    btn_ok = Button(
+        text=format_ar("تأكيد"), bold=True,
+        background_color=(0.08, 0.45, 0.75, 1),
+        color=(1, 1, 1, 1),
+        font_name=FONT_PATH if FONT_PATH else "Roboto")
+    btn_cancel = Button(
+        text=format_ar("إلغاء"),
+        background_color=(0.75, 0.22, 0.17, 1),
+        color=(1, 1, 1, 1),
+        font_name=FONT_PATH if FONT_PATH else "Roboto")
+    bottom.add_widget(btn_ok)
+    bottom.add_widget(btn_cancel)
+    root.add_widget(bottom)
+
+    info_lbl = Label(
+        text="", color=(0.4, 0.4, 0.4, 1),
+        size_hint_y=None, height=dp(20), font_size=sp(11),
+        font_name=FONT_PATH if FONT_PATH else "Roboto")
+    root.add_widget(info_lbl)
+
+    popup = Popup(title="", content=root, size_hint=(0.95, 0.92),
                   separator_color=(0.08, 0.45, 0.75, 1))
 
-    def on_ok(_):
-        paths = list(fc.selection) if fc.selection else []
+    def _match_filter(name):
+        if not filters:
+            return True
+        low = name.lower()
+        for f in filters:
+            pattern = f.lower().replace("*", "")
+            if low.endswith(pattern):
+                return True
+        return False
+
+    def _make_row(icon_text, display_name, raw_name, is_dir, full_path):
+        is_selected = full_path in state["selection"]
+        row = BoxLayout(
+            orientation="horizontal", size_hint_y=None,
+            height=dp(46), spacing=dp(8), padding=(dp(10), dp(4)))
+        row.canvas.before.clear()
+        with row.canvas.before:
+            if is_dir:
+                Color(0.92, 0.95, 1, 1)
+            elif is_selected:
+                Color(0.85, 0.93, 1, 1)
+            else:
+                Color(1, 1, 1, 1)
+            bg = Rectangle(pos=row.pos, size=row.size)
+            if is_selected and not is_dir:
+                Color(0.08, 0.45, 0.75, 1)
+                Rectangle(pos=row.pos, size=(dp(3), row.height))
+        row.bind(
+            pos=lambda i, v: setattr(bg, "pos", i.pos),
+            size=lambda i, v: setattr(bg, "size", i.size))
+
+        icon_lbl = Label(
+            text=icon_text, size_hint_x=None, width=dp(36),
+            font_size=sp(20), halign="center", valign="middle",
+            font_name=FONT_PATH if FONT_PATH else "Roboto")
+        row.add_widget(icon_lbl)
+
+        display = format_ar(display_name) if display_name else ""
+        if is_dir:
+            color = (0.08, 0.30, 0.55, 1)
+        elif is_selected:
+            color = (0.08, 0.45, 0.75, 1)
+        else:
+            color = (0.15, 0.15, 0.15, 1)
+
+        name_lbl = Label(
+            text=display, color=color,
+            font_size=sp(14), bold=is_dir,
+            halign="right", valign="middle", size_hint_x=1,
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+            shorten=True, shorten_from="right")
+        name_lbl.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
+        row.add_widget(name_lbl)
+
+        if is_dir:
+            row.add_widget(Label(
+                text=format_ar("◀"), color=(0.4, 0.4, 0.4, 1),
+                size_hint_x=None, width=dp(24), font_size=sp(14),
+                font_name=FONT_PATH if FONT_PATH else "Roboto"))
+        else:
+            check_lbl = Label(
+                text="●" if is_selected else "○",
+                color=(0.08, 0.45, 0.75, 1) if is_selected else (0.7, 0.7, 0.7, 1),
+                size_hint_x=None, width=dp(28),
+                font_size=sp(16), halign="center", valign="middle",
+                font_name=FONT_PATH if FONT_PATH else "Roboto")
+            row.add_widget(check_lbl)
+
+        def on_touch_down(touch):
+            if not row.collide_point(*touch.pos):
+                return False
+            if is_dir:
+                state["path"] = full_path
+                state["selection"] = set()
+                refresh_list()
+            else:
+                if multiple:
+                    if full_path in state["selection"]:
+                        state["selection"].discard(full_path)
+                    else:
+                        state["selection"].add(full_path)
+                    refresh_list()
+                else:
+                    state["selection"] = {full_path}
+                    refresh_list()
+            return True
+
+        row.on_touch_down = on_touch_down
+        return row
+
+    def refresh_list():
+        files_box.clear_widgets()
+        current = state["path"]
+        path_lbl.text = format_ar(current)
+
+        try:
+            entries = os.listdir(current)
+        except PermissionError:
+            files_box.add_widget(Label(
+                text=format_ar("صلاحية مرفوضة"),
+                color=(0.7, 0.2, 0.2, 1), size_hint_y=None, height=dp(60),
+                font_name=FONT_PATH if FONT_PATH else "Roboto"))
+            return
+        except Exception as e:
+            files_box.add_widget(Label(
+                text=format_ar(f"خطأ: {str(e)[:40]}"),
+                color=(0.7, 0.2, 0.2, 1), size_hint_y=None, height=dp(60),
+                font_name=FONT_PATH if FONT_PATH else "Roboto"))
+            return
+
+        dirs, files = [], []
+        for name in sorted(entries, key=lambda s: s.lower()):
+            if name.startswith("."):
+                continue
+            full = os.path.join(current, name)
+            try:
+                if os.path.isdir(full):
+                    dirs.append((name, full))
+                else:
+                    if _match_filter(name):
+                        files.append((name, full))
+            except Exception:
+                continue
+
+        parent = os.path.dirname(current.rstrip("/")) or "/"
+        if parent != current:
+            files_box.add_widget(_make_row("📁", ".. (أعلى)", "..", True, parent))
+
+        for name, full in dirs:
+            files_box.add_widget(_make_row("📁", name, name, True, full))
+
+        for name, full in files:
+            files_box.add_widget(_make_row("📄", name, name, False, full))
+
+        if not dirs and not files:
+            files_box.add_widget(Label(
+                text=format_ar("لا توجد ملفات مطابقة"),
+                color=(0.5, 0.5, 0.5, 1), size_hint_y=None, height=dp(60),
+                font_name=FONT_PATH if FONT_PATH else "Roboto"))
+
+        n = len(state["selection"])
+        if n == 0:
+            info_lbl.text = format_ar("اختر ملفاً")
+        elif n == 1:
+            info_lbl.text = format_ar(
+                f"محدد: {os.path.basename(list(state['selection'])[0])}")
+        else:
+            info_lbl.text = format_ar(f"{n} ملفات محددة")
+
+    def _up(btn):
+        current = state["path"].rstrip("/")
+        parent = os.path.dirname(current) or "/"
+        if parent != current:
+            state["path"] = parent
+            state["selection"] = set()
+            refresh_list()
+
+    btn_up.bind(on_press=_up)
+
+    def _ok(btn):
+        paths = list(state["selection"])
         popup.dismiss()
         on_result(paths)
 
-    def on_cancel(_):
+    def _cancel(btn):
         popup.dismiss()
         on_result([])
 
-    btn_ok.bind(on_press=on_ok)
-    btn_cancel.bind(on_press=on_cancel)
+    btn_ok.bind(on_press=_ok)
+    btn_cancel.bind(on_press=_cancel)
+
+    refresh_list()
     popup.open()
 
 
-# ============ ⭐ منتقي موحّد ============
+# ============ منتقي موحّد ============
 _PICKER_BOUND = {"cb": None}
+_PICKER_LOCK = {"active": False, "ts": 0}
 
 
 def pick_files(on_result, mime_type="*/*", multiple=False):
-    """منتقي موحّد: يستخدم Intent في APK، و Kivy في Pydroid/Desktop."""
-    _debug_log(f"=== pick_files START mime={mime_type} multiple={multiple} ===")
+    """منتقي موحّد: ACTION_OPEN_DOCUMENT في APK، Kivy في Pydroid/Desktop."""
+    import time as _tm
+    now = _tm.time()
+
+    if _PICKER_LOCK["active"] and (now - _PICKER_LOCK["ts"]) < 2.0:
+        _debug_log("Picker already active, ignoring")
+        return
+    _PICKER_LOCK["active"] = True
+    _PICKER_LOCK["ts"] = now
+
+    def _release():
+        _PICKER_LOCK["active"] = False
+
+    def _safe_result(paths):
+        _release()
+        try:
+            on_result(paths)
+        except Exception as e:
+            _debug_log(f"on_result error: {e}")
+
+    _debug_log(f"=== pick_files START mime={mime_type} multi={multiple} ===")
 
     if _kivy_platform != "android":
-        _pick_files_kivy_fallback(on_result, mime_type, multiple)
+        _pick_files_kivy_fallback(_safe_result, mime_type, multiple)
         return
 
-    # اختبار هل Intent متاح
     if not _can_use_android_intent():
         _debug_log("Pydroid mode → Kivy picker")
-        _pick_files_kivy_fallback(on_result, mime_type, multiple)
+        _pick_files_kivy_fallback(_safe_result, mime_type, multiple)
         return
 
-    # APK mode: استخدام Intent
     try:
         from jnius import autoclass
         from android import activity as android_activity
         Intent = autoclass('android.content.Intent')
         PythonActivity = autoclass('org.kivy.android.PythonActivity')
     except Exception as e:
-        _debug_log(f"imports failed → Kivy fallback: {e}")
-        _pick_files_kivy_fallback(on_result, mime_type, multiple)
+        _debug_log(f"imports failed: {e}")
+        _pick_files_kivy_fallback(_safe_result, mime_type, multiple)
         return
 
-    REQUEST_CODE = 0x4A1F
+    REQUEST_CODE = 0x4B01
 
-    # إزالة callback قديم
     old_cb = _PICKER_BOUND.get("cb")
     if old_cb is not None:
         try:
@@ -381,21 +578,30 @@ def pick_files(on_result, mime_type="*/*", multiple=False):
         _PICKER_BOUND["cb"] = None
 
     try:
-        intent = Intent(Intent.ACTION_GET_CONTENT)
-        intent.setType(mime_type)
+        # ACTION_OPEN_DOCUMENT يفتح مدير الملفات (ليس معرض صور)
+        intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
         intent.addCategory(Intent.CATEGORY_OPENABLE)
+        intent.setType("*/*")
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         if multiple:
             intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, True)
+        _debug_log("Intent ACTION_OPEN_DOCUMENT built")
     except Exception as e:
-        _debug_log(f"Intent build failed → Kivy: {e}")
-        _pick_files_kivy_fallback(on_result, mime_type, multiple)
+        _debug_log(f"Intent build failed: {e}")
+        _pick_files_kivy_fallback(_safe_result, mime_type, multiple)
         return
 
+    _called = {"done": False}
+
     def _on_activity_result(req_code, result_code, data):
-        _debug_log(f"on_activity_result: req={req_code} result={result_code}")
+        _debug_log(f"on_activity_result req={req_code} result={result_code}")
         if req_code != REQUEST_CODE:
             return False
+        if _called["done"]:
+            return True
+        _called["done"] = True
+
         try:
             android_activity.unbind(on_activity_result=_on_activity_result)
             _PICKER_BOUND["cb"] = None
@@ -403,15 +609,15 @@ def pick_files(on_result, mime_type="*/*", multiple=False):
             pass
 
         if result_code != -1 or data is None:
-            Clock.schedule_once(lambda dt: on_result([]), 0)
+            _debug_log("Cancelled")
+            Clock.schedule_once(lambda dt: _safe_result([]), 0)
             return True
 
         paths = []
         try:
             clip = data.getClipData()
             if clip is not None:
-                n = clip.getItemCount()
-                for i in range(n):
+                for i in range(clip.getItemCount()):
                     p = _uri_to_path(clip.getItemAt(i).getUri())
                     if p:
                         paths.append(p)
@@ -424,18 +630,26 @@ def pick_files(on_result, mime_type="*/*", multiple=False):
         except Exception as e:
             _debug_log(f"parse error: {e}")
 
-        Clock.schedule_once(lambda dt: on_result(paths), 0)
+        # فلترة حسب النوع
+        if "image" in mime_type:
+            filtered = [p for p in paths
+                        if os.path.splitext(p)[1].lower() in
+                        (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp")]
+            paths = filtered if filtered else paths
+
+        _debug_log(f"Returning {len(paths)} paths")
+        Clock.schedule_once(lambda dt: _safe_result(paths), 0)
         return True
 
     try:
         android_activity.bind(on_activity_result=_on_activity_result)
         _PICKER_BOUND["cb"] = _on_activity_result
+        _debug_log("Callback bound")
     except Exception as e:
-        _debug_log(f"bind FAILED → Kivy fallback: {e}")
-        _pick_files_kivy_fallback(on_result, mime_type, multiple)
+        _debug_log(f"bind FAILED: {e}")
+        _pick_files_kivy_fallback(_safe_result, mime_type, multiple)
         return
 
-    # تشغيل Intent على الـ UI thread
     try:
         from jnius import PythonJavaClass, java_method
 
@@ -453,22 +667,24 @@ def pick_files(on_result, mime_type="*/*", multiple=False):
                 try:
                     PythonActivity.mActivity.startActivityForResult(
                         self._intent, self._code)
+                    _debug_log("startActivity dispatched")
                 except Exception as e:
                     _debug_log(f"startActivity FAILED: {e}")
+                    Clock.schedule_once(lambda dt: _safe_result([]), 0)
 
         runnable = _LaunchRunnable(intent, REQUEST_CODE)
         PythonActivity.mActivity.runOnUiThread(runnable)
     except Exception as e:
-        _debug_log(f"UI thread failed → direct start: {e}")
+        _debug_log(f"UI thread failed: {e}")
         try:
             PythonActivity.mActivity.startActivityForResult(intent, REQUEST_CODE)
         except Exception as e2:
-            _debug_log(f"Direct start failed → Kivy: {e2}")
-            _pick_files_kivy_fallback(on_result, mime_type, multiple)
+            _debug_log(f"Direct start failed: {e2}")
+            _pick_files_kivy_fallback(_safe_result, mime_type, multiple)
 
 
-# ============ ترجمة ============
-def _split_text_for_translation(text, max_len=1200):
+# ============ الترجمة (4 محاولات) ============
+def _split_text_for_translation(text, max_len=800):
     if len(text) <= max_len:
         return [text]
     chunks, current = [], ""
@@ -498,51 +714,107 @@ def _split_text_for_translation(text, max_len=1200):
     return chunks
 
 
-def _translate_chunk(text, target_lang):
+def _translate_chunk(text, target_lang, source_lang="ar"):
+    if not text.strip():
+        return ""
+
+    # محاولة 1: Google Translate
     try:
         url = ("https://translate.googleapis.com/translate_a/single"
-               f"?client=gtx&sl=ar&tl={target_lang}&dt=t"
-               f"&q={urllib.parse.quote(text)}")
+               f"?client=gtx&sl={source_lang}&tl={target_lang}&dt=t&q="
+               + urllib.parse.quote(text))
         req = urllib.request.Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (Linux; Android 10)",
-            "Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=8, context=SSL_CONTEXT) as r:
-            data = json.loads(r.read().decode("utf-8"))
+            "User-Agent": ("Mozilla/5.0 (Linux; Android 13; SM-G991B) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) "
+                           "Chrome/120.0.0.0 Mobile Safari/537.36"),
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+            "Referer": "https://translate.google.com/",
+        })
+        with urllib.request.urlopen(req, timeout=12, context=SSL_CONTEXT) as r:
+            raw = r.read().decode("utf-8", errors="ignore")
+        data = json.loads(raw)
         if data and isinstance(data, list) and data[0]:
-            parts = [seg[0] for seg in data[0]
-                     if seg and isinstance(seg, list) and seg[0]]
+            parts = []
+            for seg in data[0]:
+                if seg and isinstance(seg, list) and seg[0]:
+                    parts.append(seg[0])
             result = "".join(parts).strip()
-            if result:
+            if result and result.lower() != text.lower():
+                _debug_log(f"✓ Google OK: {len(text)}→{len(result)}")
                 return result
     except Exception as e:
-        _debug_log(f"Google failed: {e}")
+        _debug_log(f"✗ Google failed: {e}")
 
+    # محاولة 2: MyMemory
     try:
         url = (f"https://api.mymemory.translated.net/get"
-               f"?q={urllib.parse.quote(text)}&langpair=ar|{target_lang}")
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=8, context=SSL_CONTEXT) as r:
-            data = json.loads(r.read().decode("utf-8"))
+               f"?q={urllib.parse.quote(text[:500])}&langpair={source_lang}|{target_lang}")
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Linux; Android 13)"})
+        with urllib.request.urlopen(req, timeout=12, context=SSL_CONTEXT) as r:
+            raw = r.read().decode("utf-8", errors="ignore")
+        data = json.loads(raw)
         if str(data.get("responseStatus")) == "200":
             result = data.get("responseData", {}).get("translatedText", "").strip()
-            if result:
+            if result and result.lower() != text.lower():
+                _debug_log("✓ MyMemory OK")
                 return result
     except Exception as e:
-        _debug_log(f"MyMemory failed: {e}")
+        _debug_log(f"✗ MyMemory failed: {e}")
+
+    # محاولة 3: Lingva
+    try:
+        encoded = urllib.parse.quote(text)
+        url = f"https://lingva.ml/api/v1/{source_lang}/{target_lang}/{encoded}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=12, context=SSL_CONTEXT) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        result = (data.get("translation") or "").strip()
+        if result and result.lower() != text.lower():
+            _debug_log("✓ Lingva OK")
+            return result
+    except Exception as e:
+        _debug_log(f"✗ Lingva failed: {e}")
+
+    # محاولة 4: LibreTranslate
+    try:
+        post_data = json.dumps({
+            "q": text, "source": source_lang,
+            "target": target_lang, "format": "text"
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://libretranslate.com/translate",
+            data=post_data,
+            headers={"Content-Type": "application/json",
+                     "User-Agent": "Mozilla/5.0"},
+            method="POST")
+        with urllib.request.urlopen(req, timeout=12, context=SSL_CONTEXT) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        result = (data.get("translatedText") or "").strip()
+        if result and result.lower() != text.lower():
+            _debug_log("✓ LibreTranslate OK")
+            return result
+    except Exception as e:
+        _debug_log(f"✗ LibreTranslate failed: {e}")
+
     return ""
 
 
 def translate_text(text, target_lang):
     if not text or not text.strip():
         return ""
-    chunks = _split_text_for_translation(text, max_len=1200)
+    chunks = _split_text_for_translation(text, max_len=800)
     results = []
     for chunk in chunks:
         if not chunk.strip():
             continue
         r = _translate_chunk(chunk, target_lang)
-        results.append(r if r else chunk)
-    return "\n".join(results)
+        if r:
+            results.append(r)
+        else:
+            results.append("")
+    return "\n".join(results).strip()
 
 
 # ===================== 0. Splash =====================
@@ -1121,7 +1393,7 @@ class ProductsScreen(Screen):
         content.add_widget(btn_box)
         popup.open()
 
-    # ⭐ منتقي HTML
+    # منتقي HTML — يقبل أي ملف
     def open_html_chooser_popup(self):
         self.status_label.text = format_ar("جاري فتح منتقي الملفات...")
 
@@ -1131,14 +1403,22 @@ class ProductsScreen(Screen):
                     self.status_label.text = format_ar("تم الإلغاء.")
                     return
                 path = paths[0]
+                _debug_log(f"HTML picked: {path}")
+                ext = os.path.splitext(path)[1].lower()
+                if ext not in (".html", ".htm", ".txt", ""):
+                    self.status_label.text = format_ar(
+                        f"الملف ليس HTML ({ext})")
+                    return
                 if self._save_local_copy(path):
-                    self.status_label.text = format_ar(f"تم فتح: {os.path.basename(path)}")
+                    self.status_label.text = format_ar(
+                        f"تم فتح: {os.path.basename(path)}")
                     self.load_html(None)
                 else:
                     self.status_label.text = format_ar("فشل نسخ الملف المختار.")
             Clock.schedule_once(ui_update, 0)
 
-        pick_files(on_picked, mime_type="text/html", multiple=False)
+        # */* لأن text/html يفشل على أندرويد 11+
+        pick_files(on_picked, mime_type="*/*", multiple=False)
 
     def download_html_from_github(self):
         cfg = self.load_gh_config()
@@ -1187,7 +1467,7 @@ class ProductsScreen(Screen):
         except Exception as e:
             self.status_label.text = format_ar(f"خطأ: {str(e)[:30]}")
 
-    # ⭐ استعراض صورة واحدة
+    # استعراض صورة
     def open_file_chooser_popup(self, text_input_field):
         self.status_label.text = format_ar("جاري فتح منتقي الصور...")
 
@@ -1205,7 +1485,7 @@ class ProductsScreen(Screen):
 
         pick_files(on_picked, mime_type="image/*", multiple=False)
 
-    # ⭐ لقطات شاشة متعددة
+    # لقطات الشاشة
     def open_screenshots_chooser(self, on_done):
         self.status_label.text = format_ar("جاري فتح منتقي الصور المتعدد...")
 
@@ -1381,13 +1661,23 @@ class ProductsScreen(Screen):
                 tr_desc_en = translate_text(ar_d, "en") if ar_d else ""
 
                 def update_ui(dt):
-                    if tr_name_fr: self.inputs["name_fr"].text = tr_name_fr
-                    if tr_name_en: self.inputs["name_en"].text = tr_name_en
-                    if tr_desc_fr: self.inputs["desc_fr"].text = tr_desc_fr
-                    if tr_desc_en: self.inputs["desc_en"].text = tr_desc_en
-                    got_any = any([tr_name_fr, tr_name_en, tr_desc_fr, tr_desc_en])
+                    ok = False
+                    if tr_name_fr:
+                        self.inputs["name_fr"].text = tr_name_fr
+                        ok = True
+                    if tr_name_en:
+                        self.inputs["name_en"].text = tr_name_en
+                        ok = True
+                    if tr_desc_fr:
+                        self.inputs["desc_fr"].text = tr_desc_fr
+                        ok = True
+                    if tr_desc_en:
+                        self.inputs["desc_en"].text = tr_desc_en
+                        ok = True
+
                     self.status_label.text = format_ar(
-                        "تمت الترجمة بنجاح!" if got_any else "فشلت الترجمة. تحقق من الإنترنت.")
+                        "✓ تمت الترجمة بنجاح!" if ok
+                        else "✗ فشلت الترجمة — تحقق من الإنترنت")
                     btn_translate.disabled = False
 
                 Clock.schedule_once(update_ui, 0)
