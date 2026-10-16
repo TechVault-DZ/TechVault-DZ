@@ -347,6 +347,7 @@ class ProductsScreen(Screen):
         self.products = []
         self.bundled_html_path = os.path.join(BASE_DIR, "index.html")
         self.full_image_paths = {}
+        self.current_screenshots = []
 
         user_html = _user_index_path()
         if os.path.exists(user_html):
@@ -547,7 +548,6 @@ class ProductsScreen(Screen):
             self.status_label.text = format_ar(f"خطأ: {str(e)[:40]}")
             print(f"[TechVault] load_html error: {e}")
 
-    # ⭐⭐⭐ قائمة المنتجات (مع التصحيح) ⭐⭐⭐
     def refresh_products_list(self):
         try:
             self.products_layout.clear_widgets()
@@ -574,6 +574,7 @@ class ProductsScreen(Screen):
                 version = p.get("version", "v1.0.0")
                 size_mb = p.get("size", "—")
                 rating = p.get("rating", 0)
+                n_shots = len(p.get("screenshots", []))
 
                 if cat == "ANDROID":
                     accent = (0.05, 0.58, 0.38, 1)
@@ -637,8 +638,9 @@ class ProductsScreen(Screen):
                     subtitle_lbl.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
                     info_box.add_widget(subtitle_lbl)
 
+                shots_part = f"  •  📷 {n_shots}" if n_shots > 0 else ""
                 details_lbl = Label(
-                    text=f"{version}  •  {size_mb}  •  {rating} / 5",
+                    text=f"{version}  •  {size_mb}  •  {rating} / 5{shots_part}",
                     color=(0.4, 0.4, 0.4, 1),
                     font_size=sp(11),
                     halign="right", valign="middle",
@@ -685,6 +687,7 @@ class ProductsScreen(Screen):
         cat = p.get("category", "desktop").upper()
         version = p.get("version", "v1.0.0")
         size_mb = p.get("size", "—")
+        n_shots = len(p.get("screenshots", []))
 
         content = BoxLayout(orientation="vertical", padding=dp(18), spacing=dp(14))
         with content.canvas.before:
@@ -706,7 +709,7 @@ class ProductsScreen(Screen):
         content.add_widget(title_lbl)
 
         info_lbl = Label(
-            text=format_ar(f"{cat}  •  {version}  •  {size_mb}"),
+            text=format_ar(f"{cat}  •  {version}  •  {size_mb}  •  📷 {n_shots}"),
             font_size=sp(12), color=(0.5, 0.5, 0.5, 1),
             halign="center", valign="middle",
             size_hint_y=None, height=dp(24),
@@ -1069,6 +1072,68 @@ class ProductsScreen(Screen):
         content.add_widget(btn_layout)
         popup.open()
 
+    # ⭐ دالة جديدة: اختيار لقطات شاشة متعددة
+    def open_screenshots_chooser(self, on_done):
+        if not has_manage_external_storage():
+            self._show_all_files_dialog()
+            return
+        content = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(10))
+        with content.canvas.before:
+            Color(0.12, 0.15, 0.13, 1)
+            self.bg_ss_chooser = Rectangle(size=content.size, pos=content.pos)
+        content.bind(
+            size=lambda s, w: setattr(self.bg_ss_chooser, "size", s.size),
+            pos=lambda s, w: setattr(self.bg_ss_chooser, "pos", s.pos),
+        )
+        initial_path = "/storage/emulated/0"
+        if not os.path.exists(initial_path):
+            initial_path = "/sdcard"
+        if not os.path.exists(initial_path):
+            initial_path = os.path.expanduser("~")
+
+        file_chooser = FileChooserIconView(
+            filters=["*.png", "*.jpg", "*.jpeg"],
+            path=initial_path, size_hint=(1, 1), multiselect=True,
+        )
+        content.add_widget(file_chooser)
+
+        btn_layout = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
+        btn_select = Button(
+            text=format_ar("إضافة المحدد"),
+            background_color=(0.05, 0.58, 0.38, 1),
+            color=(1, 1, 1, 1), bold=True,
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        btn_cancel = Button(
+            text=format_ar("إلغاء"),
+            background_color=(0.7, 0.2, 0.2, 1),
+            color=(1, 1, 1, 1), bold=True,
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        popup = Popup(
+            title=format_ar("اختر لقطات الشاشة (يمكن تحديد عدة صور)"),
+            title_font=FONT_PATH if FONT_PATH else "Roboto",
+            title_size=sp(15), title_align="center",
+            content=content, size_hint=(0.94, 0.92),
+            separator_color=(0.15, 0.35, 0.55, 1),
+        )
+
+        def on_select(instance):
+            for full_path in file_chooser.selection:
+                filename = os.path.basename(full_path)
+                if filename not in self.current_screenshots:
+                    self.current_screenshots.append(filename)
+                self.full_image_paths[filename] = full_path
+            popup.dismiss()
+            on_done()
+
+        btn_select.bind(on_press=on_select)
+        btn_cancel.bind(on_press=popup.dismiss)
+        btn_layout.add_widget(btn_select)
+        btn_layout.add_widget(btn_cancel)
+        content.add_widget(btn_layout)
+        popup.open()
+
     def open_product_form(self, idx=None):
         is_edit = idx is not None
         p = (
@@ -1081,6 +1146,7 @@ class ProductsScreen(Screen):
                 "color": "from-blue-500 to-indigo-600",
                 "image": "",
                 "download_url": "",
+                "screenshots": [],
                 "name": {"ar": "", "fr": "", "en": ""},
                 "desc": {"ar": "", "fr": "", "en": ""},
                 "version": "v1.0.0",
@@ -1088,6 +1154,9 @@ class ProductsScreen(Screen):
                 "rating": 4.8,
             }
         )
+
+        # ⭐ لقطات الشاشة الحالية
+        self.current_screenshots = list(p.get("screenshots", []))
 
         content = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
         with content.canvas.before:
@@ -1124,9 +1193,9 @@ class ProductsScreen(Screen):
             ("name_ar", "الاسم (عربي)", p.get("name", {}).get("ar", "")),
             ("name_fr", "الاسم (فرنسي)", p.get("name", {}).get("fr", "")),
             ("name_en", "الاسم (إنجليزي)", p.get("name", {}).get("en", "")),
-            ("desc_ar", "الوصف (عربي)", p.get("desc", {}).get("ar", "")),
-            ("desc_fr", "الوصف (فرنسي)", p.get("desc", {}).get("fr", "")),
-            ("desc_en", "الوصف (إنجليزي)", p.get("desc", {}).get("en", "")),
+            ("desc_ar", "الوصف (عربي) - نص طويل مدعوم", p.get("desc", {}).get("ar", "")),
+            ("desc_fr", "الوصف (فرنسي) - نص طويل مدعوم", p.get("desc", {}).get("fr", "")),
+            ("desc_en", "الوصف (إنجليزي) - نص طويل مدعوم", p.get("desc", {}).get("en", "")),
             ("version", "رقم الإصدار", p.get("version", "")),
             ("size", "الحجم", p.get("size", "")),
             ("rating", "التقييم (للزوار)", str(p.get("rating", 4.8))),
@@ -1171,13 +1240,86 @@ class ProductsScreen(Screen):
                 form_layout.add_widget(img_layout)
                 continue
 
-            ti = TextInput(
-                text=str(val), multiline=False,
-                size_hint_y=None, height=dp(40),
-                font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
+            # ⭐ حقول الوصف: متعددة الأسطر لتقبل نصوصاً طويلة
+            if key in ("desc_ar", "desc_fr", "desc_en"):
+                ti = TextInput(
+                    text=str(val), multiline=True,
+                    size_hint_y=None, height=dp(120),
+                    font_name=FONT_PATH if FONT_PATH else "Roboto",
+                )
+            else:
+                ti = TextInput(
+                    text=str(val), multiline=False,
+                    size_hint_y=None, height=dp(40),
+                    font_name=FONT_PATH if FONT_PATH else "Roboto",
+                )
             self.inputs[key] = ti
             form_layout.add_widget(ti)
+
+        # ⭐⭐ قسم لقطات الشاشة ⭐⭐
+        lbl_ss = Label(
+            text=format_ar("لقطات الشاشة (Screenshots)"),
+            color=(0.15, 0.15, 0.15, 1),
+            size_hint_y=None, height=dp(28), halign="right",
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        form_layout.add_widget(lbl_ss)
+
+        self.screenshots_box = BoxLayout(
+            orientation="vertical", size_hint_y=None, spacing=dp(4)
+        )
+        self.screenshots_box.bind(minimum_height=self.screenshots_box.setter("height"))
+        form_layout.add_widget(self.screenshots_box)
+
+        def refresh_screenshots():
+            self.screenshots_box.clear_widgets()
+            if not self.current_screenshots:
+                self.screenshots_box.add_widget(Label(
+                    text=format_ar("لا توجد لقطات بعد"),
+                    color=(0.6, 0.6, 0.6, 1),
+                    size_hint_y=None, height=dp(30),
+                    font_name=FONT_PATH if FONT_PATH else "Roboto",
+                ))
+                return
+            for name in list(self.current_screenshots):
+                row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(6))
+                lbl_name = Label(
+                    text=name, color=(0.2, 0.2, 0.2, 1),
+                    halign="left", valign="middle",
+                    size_hint_x=0.78,
+                    font_name=FONT_PATH if FONT_PATH else "Roboto",
+                )
+                lbl_name.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
+                row.add_widget(lbl_name)
+
+                def make_del(n):
+                    def _del(btn):
+                        if n in self.current_screenshots:
+                            self.current_screenshots.remove(n)
+                        refresh_screenshots()
+                    return _del
+
+                del_btn = Button(
+                    text="✕", size_hint_x=0.22,
+                    background_color=(0.7, 0.2, 0.2, 1),
+                    color=(1, 1, 1, 1),
+                    font_name=FONT_PATH if FONT_PATH else "Roboto",
+                )
+                del_btn.bind(on_press=make_del(name))
+                row.add_widget(del_btn)
+                self.screenshots_box.add_widget(row)
+
+        btn_add_ss = Button(
+            text=format_ar("+ إضافة لقطات شاشة"),
+            size_hint_y=None, height=dp(42),
+            background_color=(0.15, 0.35, 0.55, 1),
+            color=(1, 1, 1, 1), bold=True,
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        btn_add_ss.bind(on_press=lambda x: self.open_screenshots_chooser(refresh_screenshots))
+        form_layout.add_widget(btn_add_ss)
+
+        refresh_screenshots()
 
         def run_translation(instance):
             ar_n = self.inputs["name_ar"].text.strip()
@@ -1248,6 +1390,7 @@ class ProductsScreen(Screen):
                     "color": self.inputs["color"].text.strip(),
                     "image": os.path.basename(self.inputs["image"].text.strip()),
                     "download_url": self.inputs["download_url"].text.strip(),
+                    "screenshots": list(self.current_screenshots),   # ⭐
                     "name": {
                         "ar": self.inputs["name_ar"].text.strip(),
                         "fr": self.inputs["name_fr"].text.strip(),
@@ -1260,7 +1403,7 @@ class ProductsScreen(Screen):
                     },
                     "version": self.inputs["version"].text.strip(),
                     "size": self.inputs["size"].text.strip(),
-                    "rating": float(self.inputs["rating"].text.strip()),
+                    "rating": float(self.inputs["rating"].text.strip() or 0),
                 }
                 if is_edit:
                     self.products[idx] = new_p
@@ -1341,6 +1484,7 @@ class ProductsScreen(Screen):
                     files.append(("logo.png", logo_path))
 
                 for p in self.products:
+                    # الصورة الرئيسية
                     img_name = p.get("image", "")
                     if img_name and not img_name.startswith("http"):
                         local_img_path = self.full_image_paths.get(img_name, "")
@@ -1355,6 +1499,23 @@ class ProductsScreen(Screen):
                         if (local_img_path and os.path.exists(local_img_path)
                                 and (img_name, local_img_path) not in files):
                             files.append((img_name, local_img_path))
+
+                    # ⭐ لقطات الشاشة
+                    for ss_name in p.get("screenshots", []):
+                        if not ss_name or ss_name.startswith("http"):
+                            continue
+                        ss_path = self.full_image_paths.get(ss_name, "")
+                        if not ss_path or not os.path.exists(ss_path):
+                            candidate = os.path.join(BASE_DIR, ss_name)
+                            if os.path.exists(candidate):
+                                ss_path = candidate
+                            else:
+                                sd_path = os.path.join("/sdcard/Download", ss_name)
+                                if os.path.exists(sd_path):
+                                    ss_path = sd_path
+                        if (ss_path and os.path.exists(ss_path)
+                                and (ss_name, ss_path) not in files):
+                            files.append((ss_name, ss_path))
 
                 for name, path in files:
                     api_url = f"https://api.github.com/repos/{user}/{repo}/contents/{name}"
@@ -1551,7 +1712,7 @@ class SettingsScreen(Screen):
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         ))
         layout.add_widget(Label(
-            text=format_ar("إصدار التطبيق: v2.1.0 (TechVault DZ)"),
+            text=format_ar("إصدار التطبيق: v2.2.0 (TechVault DZ)"),
             size_hint_y=None, height=dp(25), color=(0.2, 0.2, 0.2, 1),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         ))

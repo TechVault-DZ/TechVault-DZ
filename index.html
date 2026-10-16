@@ -4,28 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TechVault DZ - المتجر الرقمي للبرمجيات</title>
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-        }
-    </script>
-    <!-- FontAwesome Icons -->
+    <script>tailwind.config = { darkMode: 'class' };</script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Google Fonts: Cairo -->
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap" rel="stylesheet">
-    <style>
-        body { font-family: 'Cairo', sans-serif; }
-    </style>
+    <style>body { font-family: 'Cairo', sans-serif; }</style>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 min-h-screen transition-colors duration-300">
 
-    <!-- Header -->
     <header class="sticky top-0 z-50 backdrop-blur-md bg-white/80 dark:bg-gray-900/80 border-b border-gray-200 dark:border-gray-800">
         <div class="max-w-6xl mx-auto px-2 sm:px-4 h-16 sm:h-20 flex items-center justify-between gap-2">
-            
-            <!-- Logo & Brand Image Integration -->
             <div class="flex items-center gap-2 cursor-pointer group min-w-0" onclick="window.scrollTo({top: 0, behavior: 'smooth'})">
                 <img src="logo.png" alt="TechVault DZ Logo" class="h-9 sm:h-12 w-auto object-contain rounded-xl shadow-sm group-hover:scale-105 transition-transform duration-300 flex-shrink-0" onerror="this.onerror=null; this.src='https://via.placeholder.com/150?text=TechVault+DZ';">
                 <div class="min-w-0 truncate">
@@ -36,15 +24,12 @@
                     <p class="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 truncate" data-i18n="siteSubtitle">الخزنة الجزائرية للبرمجيات والتطبيقات</p>
                 </div>
             </div>
-
-            <!-- Controls (Language & Theme) -->
             <div class="flex items-center gap-2 flex-shrink-0">
                 <select id="langSelect" onchange="changeLanguage(this.value)" class="bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg sm:rounded-xl px-2 sm:px-3 py-1 text-xs sm:text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500 text-gray-800 dark:text-gray-200">
                     <option value="ar">العربية 🇩🇿</option>
                     <option value="fr">Français</option>
                     <option value="en">English</option>
                 </select>
-
                 <button onclick="toggleTheme()" class="w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-700 transition flex-shrink-0">
                     <i id="themeIcon" class="fa-solid fa-moon text-xs sm:text-sm text-gray-600 dark:text-gray-400"></i>
                 </button>
@@ -52,81 +37,65 @@
         </div>
     </header>
 
-    <!-- Main Container -->
     <main class="max-w-6xl mx-auto px-4 py-8">
-        
-        <!-- Hero Search & Filter Section -->
         <div class="mb-8 space-y-4">
             <div class="relative max-w-xl mx-auto">
                 <i class="fa-solid fa-magnifying-glass absolute top-1/2 -translate-y-1/2 right-4 text-gray-400"></i>
                 <input type="text" id="searchInput" oninput="filterProducts()" data-i18n-placeholder="searchPlaceholder" placeholder="ابحث عن برنامج أو تطبيق..." class="w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-12 py-3.5 shadow-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 transition">
             </div>
-
-            <!-- Categories Tabs -->
             <div class="flex justify-center gap-2" id="categoryTabs">
                 <button onclick="setCategory('all')" id="cat-all" class="px-5 py-2 rounded-xl text-sm font-semibold bg-emerald-600 text-white shadow-md shadow-emerald-600/20 transition" data-i18n="allApps">الكل</button>
                 <button onclick="setCategory('desktop')" id="cat-desktop" class="px-5 py-2 rounded-xl text-sm font-semibold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition" data-i18n="desktopApps">برامج الكمبيوتر</button>
                 <button onclick="setCategory('android')" id="cat-android" class="px-5 py-2 rounded-xl text-sm font-semibold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition" data-i18n="androidApps">تطبيقات الأندرويد</button>
             </div>
         </div>
-
-        <!-- Products Grid -->
-        <div id="productsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <!-- Data will be dynamically loaded -->
-        </div>
+        <div id="productsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
     </main>
 
-    <!-- Footer -->
     <footer class="border-t border-gray-200 dark:border-gray-800 mt-20 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
         <p>&copy; 2026 <span data-i18n="siteTitle">TechVault DZ</span>. <span data-i18n="footerText">صنع في الجزائر 🇩🇿</span></p>
     </footer>
 
-    <!-- JavaScript Logic -->
+    <!-- ============ Screenshots Gallery Modal ============ -->
+    <div id="galleryModal" class="fixed inset-0 z-[100] hidden bg-black/85 backdrop-blur-sm items-center justify-center p-4" onclick="closeGallery(event)">
+        <div class="relative max-w-5xl w-full" onclick="event.stopPropagation()">
+            <button onclick="closeGallery()" class="absolute -top-12 right-0 w-10 h-10 rounded-full bg-white/10 hover:bg-red-500 text-white text-xl transition flex items-center justify-center">
+                <i class="fa-solid fa-times"></i>
+            </button>
+            <div class="bg-gray-900 rounded-3xl overflow-hidden shadow-2xl">
+                <div class="flex items-center justify-center bg-black min-h-[300px]">
+                    <img id="galleryMainImg" src="" alt="" class="max-h-[70vh] w-auto object-contain">
+                </div>
+                <div id="galleryThumbs" class="flex gap-2 overflow-x-auto p-3 bg-gray-800"></div>
+            </div>
+        </div>
+    </div>
+
     <script>
         const products = [
-    {
-        "id": 1,
-        "category": "android",
-        "icon": "fa-solid fa-code",
-        "color": "from-blue-500 to-indigo-600",
-        "image": "showroom.png",
-        "download_url": "https://drive.google.com/file/d/1-Qm7uLuEiO4xowYPfWYTGYgLACi_4e-7/view?usp=drivesdk",
-        "name": {
-            "ar": "تطبيق إدارة معرض سيارات",
-            "fr": "ShowroomManager",
-            "en": "ShowroomManager"
-        },
-        "desc": {
-            "ar": "الحل الأمثل لإدارة معارض ووكالات السيارات باحترافية وسهولة. نظّم مخزون السيارات، بيانات الزبائن، والعقود في مكان واحد مع دعم كامل للغتين العربية والفرنسية، وإصدار فوري للمستندات الرسمية بصيغة PDF المزودة برموز الـ QR للتوثيق والتحقق السريع.",
-            "fr": "La solution idéale pour gérer les showrooms et agences automobiles avec professionnalisme et simplicité. Organisez votre stock de véhicules, vos données clients et vos contrats en un seul endroit, avec un support complet pour les langues arabe et française, et l'émission instantanée de documents officiels au format PDF équipés de codes QR pour l'authentification et la vérification rapide.",
-            "en": "The ultimate solution for managing car dealerships and showrooms with professionalism and ease. Organize your vehicle inventory, customer data, and contracts in one place with full support for both Arabic and French, and instantly issue official PDF documents equipped with QR codes for quick documentation and verification."
-        },
-        "version": "v1.1.36",
-        "size": "53.1 MB",
-        "rating": 4.8
-    },
-    {
-        "id": 2,
-        "category": "android",
-        "icon": "fa-solid fa-code",
-        "color": "from-blue-500 to-indigo-600",
-        "image": "icon.png",
-        "download_url": "https://drive.google.com/file/d/1exd-xt8vUyJvVHelNeDAk7RZK2NTNy0z/view?usp=drivesdk",
-        "name": {
-            "ar": "تطبيق تسيير الديون",
-            "fr": "Application de gestion de la dette",
-            "en": "Debt Management Application"
-        },
-        "desc": {
-            "ar": "تطبيق أندرويد لإدارة الديون الشخصية، تسجيل الراتب والمصاريف، ووضع خطة سداد ذكية حسب الأولوية. واجهة إنجليزية أنيقة مع دعم كامل للأسماء والملاحظات العربية. جميع البيانات تُخزَّن محلياً على جهازك.",
-            "fr": "Application Android pour gérer les dettes personnelles, enregistrer les salaires et les dépenses, et développer un plan de paiement intelligent par ordre de priorité. Interface anglaise élégante avec prise en charge complète des noms et notes arabes. Toutes les données sont stockées localement sur votre appareil.",
-            "en": "Android application to manage personal debts, record salary and expenses, and develop a smart payment plan in order of priority. Elegant English interface with full support for Arabic names and notes. All data is stored locally on your device."
-        },
-        "version": "v3.0.0",
-        "size": "36.5 MB",
-        "rating": 4.5
-    }
-];
+            {
+                "id": 1,
+                "category": "android",
+                "icon": "fa-solid fa-code",
+                "color": "from-blue-500 to-indigo-600",
+                "image": "showroom.png",
+                "download_url": "https://drive.google.com/file/d/1-Qm7uLuEiO4xowYPfWYTGYgLACi_4e-7/view?usp=drivesdk",
+                "screenshots": [],
+                "name": {
+                    "ar": "تطبيق إدارة معرض سيارات",
+                    "fr": "ShowroomManager",
+                    "en": "ShowroomManager"
+                },
+                "desc": {
+                    "ar": "الحل الأمثل لإدارة معارض ووكالات السيارات باحترافية وسهولة. نظّم مخزون السيارات، بيانات الزبائن، والعقود في مكان واحد مع دعم كامل للغتين العربية والفرنسية، وإصدار فوري للمستندات الرسمية بصيغة PDF المزودة برموز الـ QR للتوثيق والتحقق السريع.",
+                    "fr": "La solution idéale pour gérer les showrooms et agences automobiles avec professionnalisme et simplicité. Organisez votre stock de véhicules, vos données clients et vos contrats en un seul endroit, avec un support complet pour les langues arabe et française, et l'émission instantanée de documents officiels au format PDF équipés de codes QR pour l'authentification et la vérification rapide.",
+                    "en": "The ultimate solution for managing car dealerships and showrooms with professionalism and ease. Organize your vehicle inventory, customer data, and contracts in one place with full support for both Arabic and French, and instantly issue official PDF documents equipped with QR codes for quick documentation and verification."
+                },
+                "version": "v1.1.36",
+                "size": "53.1 MB",
+                "rating": 4.8
+            }
+        ];
 
         const translations = {
             ar: {
@@ -139,7 +108,8 @@
                 version: "الإصدار",
                 size: "الحجم",
                 download: "تحميل",
-                footerText: "صنع   في الجزائر 🇩🇿"
+                screenshots: "لقطات الشاشة",
+                footerText: "صنع في الجزائر 🇩🇿"
             },
             fr: {
                 siteTitle: "TechVault DZ",
@@ -151,6 +121,7 @@
                 version: "Version",
                 size: "Taille",
                 download: "Télécharger",
+                screenshots: "Captures d'écran",
                 footerText: "Fait en Algérie 🇩🇿"
             },
             en: {
@@ -163,6 +134,7 @@
                 version: "Version",
                 size: "Size",
                 download: "Download",
+                screenshots: "Screenshots",
                 footerText: "Made in Algeria 🇩🇿"
             }
         };
@@ -173,28 +145,16 @@
         function changeLanguage(lang) {
             currentLang = lang;
             const html = document.getElementById('htmlRoot');
-            if (lang === 'ar') {
-                html.setAttribute('dir', 'rtl');
-                html.setAttribute('lang', 'ar');
-            } else {
-                html.setAttribute('dir', 'ltr');
-                html.setAttribute('lang', lang);
-            }
-
+            html.setAttribute('dir', lang === 'ar' ? 'rtl' : 'ltr');
+            html.setAttribute('lang', lang);
             document.querySelectorAll('[data-i18n]').forEach(el => {
                 const key = el.getAttribute('data-i18n');
-                if (translations[lang][key]) {
-                    el.innerText = translations[lang][key];
-                }
+                if (translations[lang][key]) el.innerText = translations[lang][key];
             });
-
             document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
                 const key = el.getAttribute('data-i18n-placeholder');
-                if (translations[lang][key]) {
-                    el.placeholder = translations[lang][key];
-                }
+                if (translations[lang][key]) el.placeholder = translations[lang][key];
             });
-
             filterProducts();
         }
 
@@ -230,6 +190,10 @@
             filterProducts();
         }
 
+        function escapeHtml(s) {
+            return String(s || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+        }
+
         function filterProducts() {
             const query = document.getElementById('searchInput').value.toLowerCase();
             const grid = document.getElementById('productsGrid');
@@ -239,8 +203,7 @@
                 const matchesCat = currentCategory === 'all' || p.category === currentCategory;
                 const name = (p.name[currentLang] || p.name['ar'] || '').toLowerCase();
                 const desc = (p.desc[currentLang] || p.desc['ar'] || '').toLowerCase();
-                const matchesQuery = name.includes(query) || desc.includes(query);
-                return matchesCat && matchesQuery;
+                return matchesCat && (name.includes(query) || desc.includes(query));
             });
 
             if (filtered.length === 0) {
@@ -249,16 +212,23 @@
             }
 
             filtered.forEach(p => {
-                const name = p.name[currentLang] || p.name['ar'];
-                const desc = p.desc[currentLang] || p.desc['ar'];
+                const name = escapeHtml(p.name[currentLang] || p.name['ar']);
+                const desc = escapeHtml(p.desc[currentLang] || p.desc['ar']);
                 const t = translations[currentLang];
                 const downloadUrl = p.download_url && p.download_url.trim() !== "" ? p.download_url : "#";
+                const hasShots = Array.isArray(p.screenshots) && p.screenshots.length > 0;
 
-                const iconOrImage = p.image 
+                const iconOrImage = p.image
                     ? `<img src="${p.image}" alt="${name}" class="w-14 h-14 rounded-2xl object-cover shadow-md group-hover:scale-105 transition-transform">`
                     : `<div class="w-14 h-14 rounded-2xl bg-gradient-to-tr ${p.color} flex items-center justify-center text-white text-2xl shadow-md group-hover:scale-105 transition-transform"><i class="${p.icon}"></i></div>`;
 
-                const card = `
+                const shotsBtn = hasShots ? `
+                    <button onclick="openGallery(${p.id})" class="w-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-semibold py-2.5 rounded-xl transition flex items-center justify-center gap-2 text-sm">
+                        <i class="fa-solid fa-images"></i>
+                        <span>${t.screenshots} (${p.screenshots.length})</span>
+                    </button>` : '';
+
+                grid.innerHTML += `
                     <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-3xl p-6 shadow-sm hover:shadow-md transition flex flex-col justify-between group">
                         <div>
                             <div class="flex items-start justify-between gap-4 mb-4">
@@ -276,11 +246,12 @@
                             </div>
                             <p class="text-gray-600 dark:text-gray-300 text-sm mb-6">${desc}</p>
                         </div>
-                        <div class="space-y-4">
+                        <div class="space-y-3">
                             <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pt-3 border-t border-gray-100 dark:border-gray-700">
                                 <span>${t.version}: <strong class="text-gray-700 dark:text-gray-200">${p.version}</strong></span>
                                 <span>${t.size}: <strong class="text-gray-700 dark:text-gray-200">${p.size}</strong></span>
                             </div>
+                            ${shotsBtn}
                             <a href="${downloadUrl}" target="_blank" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 text-sm">
                                 <i class="fa-solid fa-download"></i>
                                 <span>${t.download}</span>
@@ -288,12 +259,45 @@
                         </div>
                     </div>
                 `;
-                grid.innerHTML += card;
             });
         }
+
+        // ============ Gallery Logic ============
+        function openGallery(productId) {
+            const p = products.find(x => x.id === productId);
+            if (!p || !Array.isArray(p.screenshots) || p.screenshots.length === 0) return;
+            const modal = document.getElementById('galleryModal');
+            const main = document.getElementById('galleryMainImg');
+            const thumbs = document.getElementById('galleryThumbs');
+            main.src = p.screenshots[0];
+            thumbs.innerHTML = '';
+            p.screenshots.forEach((ss, i) => {
+                const img = document.createElement('img');
+                img.src = ss;
+                img.className = "w-16 h-16 rounded-lg object-cover cursor-pointer border-2 flex-shrink-0 transition " + (i === 0 ? "border-emerald-500" : "border-transparent hover:border-emerald-300");
+                img.onclick = () => {
+                    main.src = ss;
+                    [...thumbs.children].forEach(c => c.className = "w-16 h-16 rounded-lg object-cover cursor-pointer border-2 flex-shrink-0 transition border-transparent hover:border-emerald-300");
+                    img.className = "w-16 h-16 rounded-lg object-cover cursor-pointer border-2 flex-shrink-0 transition border-emerald-500";
+                };
+                thumbs.appendChild(img);
+            });
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeGallery(event) {
+            if (event && event.target.id !== 'galleryModal') return;
+            const modal = document.getElementById('galleryModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') closeGallery();
+        });
 
         filterProducts();
     </script>
 </body>
 </html>
-
