@@ -927,7 +927,7 @@ class ProductsScreen(Screen):
         if not os.path.exists(initial_path):
             initial_path = os.path.expanduser("~")
         file_chooser = FileChooserIconView(
-            filters=["*.html", "*.htm"], path=initial_path, size_hint=(1, 1)
+            filters=["*"]   # يعرض كل شيء
         )
         content.add_widget(file_chooser)
         btn_layout = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
