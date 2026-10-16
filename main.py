@@ -120,6 +120,80 @@ def format_ar(text):
     return s
 
 
+# ============ أزرار عصرية مدورة ============
+from kivy.graphics import RoundedRectangle, Triangle
+
+# لوحة ألوان موحدة
+C_PRIMARY = (0.05, 0.58, 0.38, 1)    # أخضر
+C_BLUE = (0.15, 0.35, 0.55, 1)       # أزرق
+C_TEAL = (0.06, 0.46, 0.55, 1)       # تركوازي
+C_DANGER = (0.78, 0.25, 0.22, 1)     # أحمر
+C_NEUTRAL = (0.55, 0.58, 0.62, 1)    # رمادي
+C_DARK = (0.22, 0.25, 0.29, 1)       # داكن
+C_ORANGE = (0.85, 0.52, 0.10, 1)     # برتقالي
+
+
+class RoundButton(Button):
+    """زر مدوّر الزوايا بلون ثابت مع تأثير الضغط، ويدعم رسم سهم (up/down) بلا خطوط."""
+
+    def __init__(self, bg=C_PRIMARY, radius=12, icon=None, **kw):
+        kw.setdefault("font_name", FONT_PATH if FONT_PATH else "Roboto")
+        kw.setdefault("color", (1, 1, 1, 1))
+        kw.setdefault("bold", True)
+        super(RoundButton, self).__init__(**kw)
+        self.background_normal = ""
+        self.background_down = ""
+        self.background_color = (0, 0, 0, 0)
+        self._bg = tuple(bg)
+        self._radius = dp(radius)
+        self._icon = icon
+        with self.canvas.before:
+            self._col = Color(*self._bg)
+            self._rect = RoundedRectangle(pos=self.pos, size=self.size,
+                                          radius=[self._radius])
+        with self.canvas.after:
+            self._icol = Color(1, 1, 1, 1 if icon else 0)
+            self._tri = Triangle(points=[0, 0, 0, 0, 0, 0])
+        self.bind(pos=self._refresh, size=self._refresh,
+                  state=self._refresh, disabled=self._refresh)
+        self._refresh()
+
+    def _refresh(self, *args):
+        r, g, b, a = self._bg
+        if self.disabled:
+            self._col.rgba = (r, g, b, 0.35)
+        elif self.state == "down":
+            self._col.rgba = (r * 0.78, g * 0.78, b * 0.78, a)
+        else:
+            self._col.rgba = (r, g, b, a)
+        self._rect.pos = self.pos
+        self._rect.size = self.size
+        self._rect.radius = [self._radius]
+        if self._icon:
+            cx, cy = self.center_x, self.center_y
+            s = min(self.width, self.height) * 0.24
+            if self._icon == "up":
+                pts = [cx - s, cy - s * 0.6, cx + s, cy - s * 0.6, cx, cy + s * 0.8]
+            else:
+                pts = [cx - s, cy + s * 0.6, cx + s, cy + s * 0.6, cx, cy - s * 0.8]
+            self._tri.points = pts
+            self._icol.rgba = (1, 1, 1, 0.45 if self.disabled else 1)
+
+
+def make_input(text="", multiline=False, height=40, halign="right", **kw):
+    """حقل إدخال أنيق: خلفية بيضاء وحواف ناعمة."""
+    ti = TextInput(
+        text=str(text), multiline=multiline, size_hint_y=None, height=dp(height),
+        font_name=FONT_PATH if FONT_PATH else "Roboto",
+        background_normal="", background_active="",
+        background_color=(1, 1, 1, 1), foreground_color=(0.05, 0.05, 0.05, 1),
+        disabled_foreground_color=(0.4, 0.4, 0.4, 1),
+        hint_text_color=(0.5, 0.5, 0.5, 1),
+        cursor_color=C_PRIMARY, selection_color=(0.05, 0.58, 0.38, 0.3),
+        padding=[dp(12), dp(10), dp(12), dp(10)], halign=halign, **kw)
+    return ti
+
+
 # ============ Android Permissions ============
 def request_android_permissions():
     if _kivy_platform != "android":
@@ -182,7 +256,7 @@ def _uri_to_path(uri):
                     data_idx = cursor.getColumnIndex("_data")
                     if data_idx >= 0 and cursor.moveToFirst():
                         path = cursor.getString(data_idx)
-                        if path and os.path.exists(path):
+                        if path and os.path.exists(path) and os.access(path, os.R_OK):
                             return path
                 finally:
                     cursor.close()
@@ -197,7 +271,7 @@ def _uri_to_path(uri):
                     if ":" in doc_id:
                         _, rel_path = doc_id.split(":", 1)
                         candidate = "/storage/emulated/0/" + rel_path
-                        if os.path.exists(candidate):
+                        if os.path.exists(candidate) and os.access(candidate, os.R_OK):
                             return candidate
             except Exception as e:
                 _debug_log(f"DocumentsContract error: {e}")
@@ -230,27 +304,53 @@ def _copy_uri_to_cache(uri):
         except Exception:
             pass
 
+        if name == "picked_file":
+            try:
+                seg = uri.getLastPathSegment()
+                if seg:
+                    name = str(seg).split("/")[-1].split(":")[-1] or name
+            except Exception:
+                pass
+        name = re.sub(r'[\\/:*?"<>|]', "_", name)
+
         cache_dir = context.getCacheDir().getAbsolutePath()
         dest = os.path.join(cache_dir, name)
 
+        # الطريقة الموثوقة: قراءة الملف عبر File Descriptor من بايثون مباشرة
+        # (تجنّب مشكلة bytearray في pyjnius التي تنتج ملفاً فارغاً/تالفاً)
+        try:
+            pfd = ContentResolver.openFileDescriptor(uri, "r")
+            if pfd is not None:
+                fd = pfd.detachFd()
+                with os.fdopen(fd, "rb") as src, open(dest, "wb") as dst:
+                    while True:
+                        chunk = src.read(65536)
+                        if not chunk:
+                            break
+                        dst.write(chunk)
+                _debug_log(f"Copied URI via fd -> {dest}")
+                return dest
+        except Exception as e:
+            _debug_log(f"fd copy failed: {e}")
+
+        # بديل: قراءة بايت بايت عبر InputStream
         input_stream = ContentResolver.openInputStream(uri)
         if input_stream is None:
             return None
-
-        FileOutputStream = autoclass('java.io.FileOutputStream')
-        output_stream = FileOutputStream(dest)
-        buf = bytearray(8192)
-        while True:
-            n = input_stream.read(buf)
-            if n <= 0:
-                break
-            output_stream.write(buf, 0, n)
-        output_stream.close()
-        input_stream.close()
-        _debug_log(f"Copied URI -> {dest}")
+        try:
+            with open(dest, "wb") as dst:
+                while True:
+                    b = input_stream.read()
+                    if b < 0:
+                        break
+                    dst.write(bytes([b]))
+        finally:
+            input_stream.close()
+        _debug_log(f"Copied URI via stream -> {dest}")
         return dest
     except Exception as e:
         _debug_log(f"copy to cache error: {e}")
+        _PICKER_STATE["error"] = f"تعذّر قراءة الملف: {str(e)[:40]}"
         return None
 
 
@@ -265,6 +365,7 @@ def _can_use_android_intent():
         return True
     except Exception as e:
         _debug_log(f"Intent unavailable: {e}")
+        _PICKER_STATE["why"] = f"Intent unavailable: {e}"
         return False
 
 
@@ -341,6 +442,14 @@ def _pick_files_kivy_fallback(on_result, mime_type="*/*", multiple=False):
         size_hint_y=None, height=dp(20), font_size=sp(11),
         font_name=FONT_PATH if FONT_PATH else "Roboto")
     root.add_widget(info_lbl)
+
+    if _kivy_platform == "android" and _PICKER_STATE.get("why"):
+        why_lbl = Label(
+            text="System picker unavailable: " + str(_PICKER_STATE["why"])[:90],
+            color=(0.7, 0.3, 0.1, 1), size_hint_y=None, height=dp(34),
+            font_size=sp(9), halign="center", valign="middle")
+        why_lbl.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
+        root.add_widget(why_lbl)
 
     popup = Popup(title="", content=root, size_hint=(0.95, 0.92),
                   separator_color=(0.08, 0.45, 0.75, 1))
@@ -523,6 +632,7 @@ def _pick_files_kivy_fallback(on_result, mime_type="*/*", multiple=False):
 # ============ منتقي موحّد ============
 _PICKER_BOUND = {"cb": None}
 _PICKER_LOCK = {"active": False, "ts": 0}
+_PICKER_STATE = {"error": "", "why": ""}
 
 
 def pick_files(on_result, mime_type="*/*", multiple=False):
@@ -535,6 +645,8 @@ def pick_files(on_result, mime_type="*/*", multiple=False):
         return
     _PICKER_LOCK["active"] = True
     _PICKER_LOCK["ts"] = now
+    _PICKER_STATE["error"] = ""
+    _PICKER_STATE["why"] = ""
 
     def _release():
         _PICKER_LOCK["active"] = False
@@ -554,6 +666,8 @@ def pick_files(on_result, mime_type="*/*", multiple=False):
 
     if not _can_use_android_intent():
         _debug_log("Pydroid mode → Kivy picker")
+        if not _PICKER_STATE.get("why"):
+            _PICKER_STATE["why"] = "no PythonActivity"
         _pick_files_kivy_fallback(_safe_result, mime_type, multiple)
         return
 
@@ -564,6 +678,7 @@ def pick_files(on_result, mime_type="*/*", multiple=False):
         PythonActivity = autoclass('org.kivy.android.PythonActivity')
     except Exception as e:
         _debug_log(f"imports failed: {e}")
+        _PICKER_STATE["why"] = f"imports failed: {e}"
         _pick_files_kivy_fallback(_safe_result, mime_type, multiple)
         return
 
@@ -589,6 +704,7 @@ def pick_files(on_result, mime_type="*/*", multiple=False):
         _debug_log("Intent ACTION_OPEN_DOCUMENT built")
     except Exception as e:
         _debug_log(f"Intent build failed: {e}")
+        _PICKER_STATE["why"] = f"intent build: {e}"
         _pick_files_kivy_fallback(_safe_result, mime_type, multiple)
         return
 
@@ -629,6 +745,10 @@ def pick_files(on_result, mime_type="*/*", multiple=False):
                         paths.append(p)
         except Exception as e:
             _debug_log(f"parse error: {e}")
+            _PICKER_STATE["error"] = f"خطأ قراءة الاختيار: {str(e)[:40]}"
+
+        if not paths and not _PICKER_STATE["error"]:
+            _PICKER_STATE["error"] = "تعذّر الوصول إلى الملف المختار"
 
         # فلترة حسب النوع
         if "image" in mime_type:
@@ -647,6 +767,7 @@ def pick_files(on_result, mime_type="*/*", multiple=False):
         _debug_log("Callback bound")
     except Exception as e:
         _debug_log(f"bind FAILED: {e}")
+        _PICKER_STATE["why"] = f"bind failed: {e}"
         _pick_files_kivy_fallback(_safe_result, mime_type, multiple)
         return
 
@@ -949,26 +1070,18 @@ class ProductsScreen(Screen):
 
         root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
 
-        top_bar = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(4))
-        btn_back = Button(text=format_ar("رئيسية"), size_hint_x=0.20,
-                          background_color=(0.25, 0.25, 0.25, 1),
-                          color=(1, 1, 1, 1), font_size=sp(12),
-                          font_name=FONT_PATH if FONT_PATH else "Roboto")
+        top_bar = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
+        btn_back = RoundButton(text=format_ar("رئيسية"), bg=C_DARK,
+                               size_hint_x=0.20, font_size=sp(12))
         btn_back.bind(on_press=lambda x: setattr(self.manager, "current", "home"))
-        btn_reload = Button(text=format_ar("إعادة تحميل"), size_hint_x=0.26,
-                            background_color=(0.15, 0.35, 0.55, 1),
-                            color=(1, 1, 1, 1), font_size=sp(12),
-                            font_name=FONT_PATH if FONT_PATH else "Roboto")
+        btn_reload = RoundButton(text=format_ar("إعادة تحميل"), bg=C_BLUE,
+                                 size_hint_x=0.27, font_size=sp(12))
         btn_reload.bind(on_press=self.load_html)
-        btn_open = Button(text=format_ar("فتح ملف"), size_hint_x=0.26,
-                          background_color=(0.8, 0.5, 0.1, 1),
-                          color=(1, 1, 1, 1), font_size=sp(12), bold=True,
-                          font_name=FONT_PATH if FONT_PATH else "Roboto")
+        btn_open = RoundButton(text=format_ar("فتح ملف"), bg=C_ORANGE,
+                               size_hint_x=0.24, font_size=sp(12))
         btn_open.bind(on_press=lambda x: self.open_html_chooser_popup())
-        btn_from_gh = Button(text=format_ar("من GitHub"), size_hint_x=0.28,
-                             background_color=(0.1, 0.1, 0.1, 1),
-                             color=(1, 1, 1, 1), font_size=sp(12), bold=True,
-                             font_name=FONT_PATH if FONT_PATH else "Roboto")
+        btn_from_gh = RoundButton(text=format_ar("من GitHub"), bg=C_TEAL,
+                                  size_hint_x=0.29, font_size=sp(12))
         btn_from_gh.bind(on_press=lambda x: self.download_html_from_github())
         top_bar.add_widget(btn_back)
         top_bar.add_widget(btn_reload)
@@ -976,26 +1089,36 @@ class ProductsScreen(Screen):
         top_bar.add_widget(btn_from_gh)
         root.add_widget(top_bar)
 
-        action_bar = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(4))
-        btn_add = Button(text=format_ar("إضافة منتج"), size_hint_x=0.35,
-                         background_color=(0.05, 0.58, 0.38, 1),
-                         color=(1, 1, 1, 1), font_size=sp(13), bold=True,
-                         font_name=FONT_PATH if FONT_PATH else "Roboto")
+        action_bar = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(6))
+        btn_add = RoundButton(text=format_ar("إضافة منتج"), bg=C_PRIMARY,
+                              size_hint_x=0.38, font_size=sp(13))
         btn_add.bind(on_press=lambda x: self.open_product_form())
-        btn_save = Button(text=format_ar("حفظ ورفع إلى GitHub"), size_hint_x=0.65,
-                          background_color=(0.7, 0.2, 0.2, 1),
-                          color=(1, 1, 1, 1), font_size=sp(13), bold=True,
-                          font_name=FONT_PATH if FONT_PATH else "Roboto")
+        btn_save = RoundButton(text=format_ar("حفظ ورفع إلى GitHub"), bg=C_DANGER,
+                               size_hint_x=0.62, font_size=sp(13))
         btn_save.bind(on_press=self.save_and_push)
         action_bar.add_widget(btn_add)
         action_bar.add_widget(btn_save)
         root.add_widget(action_bar)
 
+        # شريط الحالة: ارتفاع ثابت، سطران كحد أقصى، لا يتداخل مع الأزرار
+        status_box = BoxLayout(size_hint_y=None, height=dp(44),
+                               padding=(dp(10), dp(2)))
+        with status_box.canvas.before:
+            Color(1, 1, 1, 1)
+            st_bg = RoundedRectangle(pos=status_box.pos, size=status_box.size,
+                                     radius=[dp(8)])
+        status_box.bind(pos=lambda i, v: setattr(st_bg, "pos", i.pos),
+                        size=lambda i, v: setattr(st_bg, "size", i.size))
         self.status_label = Label(
             text=format_ar("إدارة منتجات TechVault DZ"),
-            size_hint_y=None, height=dp(28), color=(0.2, 0.2, 0.2, 1),
-            font_size=sp(12), font_name=FONT_PATH if FONT_PATH else "Roboto")
-        root.add_widget(self.status_label)
+            color=(0.2, 0.2, 0.2, 1), font_size=sp(11),
+            halign="center", valign="middle", max_lines=2,
+            shorten=True, shorten_from="right",
+            font_name=FONT_PATH if FONT_PATH else "Roboto")
+        self.status_label.bind(
+            size=lambda s, sz: setattr(s, "text_size", (sz[0], sz[1])))
+        status_box.add_widget(self.status_label)
+        root.add_widget(status_box)
 
         self.scroll = ScrollView()
         self.products_layout = GridLayout(cols=1, spacing=dp(8), size_hint_y=None)
@@ -1145,7 +1268,7 @@ class ProductsScreen(Screen):
                 accent = (0.05, 0.58, 0.38, 1) if cat == "ANDROID" else (0.15, 0.35, 0.55, 1)
 
                 card = BoxLayout(orientation="horizontal", size_hint_y=None,
-                                 height=dp(120), padding=dp(10), spacing=dp(10))
+                                 height=dp(100), padding=dp(10), spacing=dp(10))
                 with card.canvas.before:
                     Color(1, 1, 1, 1)
                     bg_rect = Rectangle(pos=card.pos, size=card.size)
@@ -1163,9 +1286,19 @@ class ProductsScreen(Screen):
 
                 card.bind(pos=_update_graphics, size=_update_graphics)
 
-                card.add_widget(Label(text="[b]●[/b]", markup=True, color=accent,
-                                      font_size=sp(20), size_hint_x=None, width=dp(30),
-                                      halign="center", valign="middle"))
+                # أزرار تغيير الترتيب (أعلى / أسفل)
+                arrows = BoxLayout(orientation="vertical", size_hint=(None, None),
+                                   size=(dp(30), dp(60)), spacing=dp(4),
+                                   pos_hint={"center_y": 0.5})
+                btn_up = RoundButton(bg=C_BLUE, icon="up", radius=7,
+                                     disabled=(i == 0))
+                btn_dn = RoundButton(bg=C_BLUE, icon="down", radius=7,
+                                     disabled=(i == len(self.products) - 1))
+                btn_up.bind(on_press=lambda b, k=i: self.move_product(k, k - 1))
+                btn_dn.bind(on_press=lambda b, k=i: self.move_product(k, k + 1))
+                arrows.add_widget(btn_up)
+                arrows.add_widget(btn_dn)
+                card.add_widget(arrows)
 
                 info_box = BoxLayout(orientation="vertical", spacing=dp(4))
                 title_lbl = Label(text=format_ar(name_ar), color=(0.1, 0.1, 0.1, 1),
@@ -1184,8 +1317,8 @@ class ProductsScreen(Screen):
                     sub.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
                     info_box.add_widget(sub)
 
-                shots_part = f"  •  📷 {n_shots}" if n_shots > 0 else ""
-                details = Label(text=f"{version}  •  {size_mb}  •  {rating} / 5{shots_part}",
+                shots_part = f"  •  img {n_shots}" if n_shots > 0 else ""
+                details = Label(text=f"#{i + 1}  •  {version}  •  {size_mb}  •  {rating} / 5{shots_part}",
                                 color=(0.4, 0.4, 0.4, 1), font_size=sp(11),
                                 halign="right", valign="middle",
                                 size_hint_y=None, height=dp(18),
@@ -1199,9 +1332,11 @@ class ProductsScreen(Screen):
                                       size_hint_x=None, width=dp(80),
                                       font_name=FONT_PATH if FONT_PATH else "Roboto"))
 
-                def make_clickable(c, idx):
+                def make_clickable(c, idx, arr):
                     def on_touch_down(touch):
                         if c.collide_point(*touch.pos):
+                            if arr.collide_point(*touch.pos):
+                                return arr.on_touch_down(touch)
                             try:
                                 self.open_product_options(idx)
                             except Exception as e:
@@ -1210,7 +1345,7 @@ class ProductsScreen(Screen):
                         return False
                     return on_touch_down
 
-                card.on_touch_down = make_clickable(card, i)
+                card.on_touch_down = make_clickable(card, i, arrows)
                 self.products_layout.add_widget(card)
         except Exception as e:
             _debug_log(f"refresh_products_list error: {e}\n{traceback.format_exc()}")
@@ -1240,19 +1375,17 @@ class ProductsScreen(Screen):
         content.add_widget(title_lbl)
 
         content.add_widget(Label(
-            text=format_ar(f"{cat}  •  {version}  •  {size_mb}  •  📷 {n_shots}"),
+            text=format_ar(f"{cat}  •  {version}  •  {size_mb}  •  img {n_shots}"),
             font_size=sp(12), color=(0.5, 0.5, 0.5, 1),
             halign="center", valign="middle", size_hint_y=None, height=dp(24),
             font_name=FONT_PATH if FONT_PATH else "Roboto"))
 
-        popup = Popup(title="", content=content, size_hint=(0.85, 0.5),
-                      separator_color=(0.15, 0.35, 0.55, 1),
+        popup = Popup(title="", content=content, size_hint=(0.88, 0.62),
+                      separator_color=C_BLUE,
                       background_color=(0, 0, 0, 0.5))
 
-        btn_edit = Button(text=format_ar("تعديل المنتج"), size_hint_y=None, height=dp(52),
-                          background_color=(0.15, 0.35, 0.55, 1),
-                          color=(1, 1, 1, 1), font_size=sp(15), bold=True,
-                          font_name=FONT_PATH if FONT_PATH else "Roboto")
+        btn_edit = RoundButton(text=format_ar("تعديل المنتج"), bg=C_BLUE,
+                               size_hint_y=None, height=dp(50), font_size=sp(15))
 
         def do_edit(btn):
             popup.dismiss()
@@ -1261,10 +1394,34 @@ class ProductsScreen(Screen):
         btn_edit.bind(on_press=do_edit)
         content.add_widget(btn_edit)
 
-        btn_del = Button(text=format_ar("حذف المنتج"), size_hint_y=None, height=dp(52),
-                         background_color=(0.7, 0.2, 0.2, 1),
-                         color=(1, 1, 1, 1), font_size=sp(15), bold=True,
-                         font_name=FONT_PATH if FONT_PATH else "Roboto")
+        # صف تغيير الترتيب
+        order_row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(8))
+        last = len(self.products) - 1
+
+        def make_move(target):
+            def _go(btn):
+                popup.dismiss()
+                self.move_product(idx, target)
+            return _go
+
+        b_first = RoundButton(text=format_ar("إلى الأول"), bg=C_TEAL,
+                              font_size=sp(12), disabled=(idx == 0))
+        b_up = RoundButton(text=format_ar("أعلى"), bg=C_TEAL,
+                           font_size=sp(12), disabled=(idx == 0))
+        b_dn = RoundButton(text=format_ar("أسفل"), bg=C_TEAL,
+                           font_size=sp(12), disabled=(idx == last))
+        b_last = RoundButton(text=format_ar("إلى الأخير"), bg=C_TEAL,
+                             font_size=sp(12), disabled=(idx == last))
+        b_first.bind(on_press=make_move(0))
+        b_up.bind(on_press=make_move(idx - 1))
+        b_dn.bind(on_press=make_move(idx + 1))
+        b_last.bind(on_press=make_move(last))
+        for b in (b_first, b_up, b_dn, b_last):
+            order_row.add_widget(b)
+        content.add_widget(order_row)
+
+        btn_del = RoundButton(text=format_ar("حذف المنتج"), bg=C_DANGER,
+                              size_hint_y=None, height=dp(50), font_size=sp(15))
 
         def do_delete(btn):
             popup.dismiss()
@@ -1273,13 +1430,25 @@ class ProductsScreen(Screen):
         btn_del.bind(on_press=do_delete)
         content.add_widget(btn_del)
 
-        btn_close = Button(text=format_ar("إغلاق"), size_hint_y=None, height=dp(48),
-                           background_color=(0.5, 0.5, 0.5, 1),
-                           color=(1, 1, 1, 1), font_size=sp(14),
-                           font_name=FONT_PATH if FONT_PATH else "Roboto")
+        btn_close = RoundButton(text=format_ar("إغلاق"), bg=C_NEUTRAL,
+                                size_hint_y=None, height=dp(46), font_size=sp(14))
         btn_close.bind(on_press=lambda x: popup.dismiss())
         content.add_widget(btn_close)
         popup.open()
+
+    def move_product(self, old_idx, new_idx):
+        """نقل منتج إلى موضع جديد (يحدد ترتيب العرض في الموقع)."""
+        n = len(self.products)
+        if not (0 <= old_idx < n):
+            return
+        new_idx = max(0, min(n - 1, new_idx))
+        if new_idx == old_idx:
+            return
+        item = self.products.pop(old_idx)
+        self.products.insert(new_idx, item)
+        self.status_label.text = format_ar(
+            f"تم نقل المنتج إلى المركز {new_idx + 1}. اضغط 'حفظ ورفع إلى GitHub'.")
+        Clock.schedule_once(lambda dt: self.refresh_products_list(), 0)
 
     def confirm_delete_product(self, idx):
         if not (0 <= idx < len(self.products)):
@@ -1337,8 +1506,11 @@ class ProductsScreen(Screen):
         try:
             dst = _user_index_path()
             os.makedirs(os.path.dirname(dst), exist_ok=True)
-            with open(src_path, "r", encoding="utf-8") as f:
+            with open(src_path, "r", encoding="utf-8-sig", errors="replace") as f:
                 data = f.read()
+            if not data.strip():
+                _PICKER_STATE["error"] = "الملف فارغ"
+                return False
             with open(dst, "w", encoding="utf-8") as f:
                 f.write(data)
             self.html_path = dst
@@ -1400,7 +1572,8 @@ class ProductsScreen(Screen):
         def on_picked(paths):
             def ui_update(dt):
                 if not paths:
-                    self.status_label.text = format_ar("تم الإلغاء.")
+                    err = _PICKER_STATE.get("error")
+                    self.status_label.text = format_ar(err if err else "تم الإلغاء.")
                     return
                 path = paths[0]
                 _debug_log(f"HTML picked: {path}")
@@ -1414,7 +1587,9 @@ class ProductsScreen(Screen):
                         f"تم فتح: {os.path.basename(path)}")
                     self.load_html(None)
                 else:
-                    self.status_label.text = format_ar("فشل نسخ الملف المختار.")
+                    err = _PICKER_STATE.get("error")
+                    self.status_label.text = format_ar(
+                        err if err else "فشل نسخ الملف المختار.")
             Clock.schedule_once(ui_update, 0)
 
         # */* لأن text/html يفشل على أندرويد 11+
@@ -1507,7 +1682,8 @@ class ProductsScreen(Screen):
     def open_product_form(self, idx=None):
         is_edit = idx is not None
         p = (self.products[idx] if is_edit else {
-            "id": len(self.products) + 1, "category": "desktop",
+            "id": max([int(x.get("id", 0) or 0) for x in self.products] or [0]) + 1,
+            "category": "desktop",
             "icon": "fa-solid fa-code", "color": "from-blue-500 to-indigo-600",
             "image": "", "download_url": "", "screenshots": [],
             "name": {"ar": "", "fr": "", "en": ""},
@@ -1516,23 +1692,33 @@ class ProductsScreen(Screen):
 
         self.current_screenshots = list(p.get("screenshots", []))
 
-        content = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
+        content = BoxLayout(orientation="vertical", padding=dp(14), spacing=dp(10))
         with content.canvas.before:
-            Color(0.96, 0.98, 0.96, 1)
+            Color(0.93, 0.95, 0.94, 1)
             self.bg_rect1 = Rectangle(size=content.size, pos=content.pos)
         content.bind(size=lambda s, w: setattr(self.bg_rect1, "size", s.size),
                      pos=lambda s, w: setattr(self.bg_rect1, "pos", s.pos))
-        content.add_widget(Label(text=format_ar("إدارة المنتجات"), font_size=sp(16),
-                                 bold=True, color=(0.05, 0.58, 0.38, 1),
-                                 size_hint_y=None, height=dp(35),
-                                 font_name=FONT_PATH if FONT_PATH else "Roboto"))
-        btn_translate = Button(text=format_ar("ترجمة آلية سريعة"),
-                               size_hint_y=None, height=dp(42),
-                               background_color=(0.15, 0.35, 0.55, 1),
-                               color=(1, 1, 1, 1),
-                               font_name=FONT_PATH if FONT_PATH else "Roboto")
-        scroll = ScrollView()
-        form_layout = GridLayout(cols=1, spacing=dp(8), size_hint_y=None)
+
+        # ترويسة النافذة
+        header = BoxLayout(size_hint_y=None, height=dp(44))
+        with header.canvas.before:
+            Color(*C_PRIMARY)
+            hdr_bg = RoundedRectangle(pos=header.pos, size=header.size,
+                                      radius=[dp(10)])
+        header.bind(pos=lambda i, v: setattr(hdr_bg, "pos", i.pos),
+                    size=lambda i, v: setattr(hdr_bg, "size", i.size))
+        header.add_widget(Label(
+            text=format_ar("تعديل المنتج" if is_edit else "إضافة منتج جديد"),
+            font_size=sp(16), bold=True, color=(1, 1, 1, 1),
+            font_name=FONT_PATH if FONT_PATH else "Roboto"))
+        content.add_widget(header)
+
+        btn_translate = RoundButton(text=format_ar("ترجمة آلية سريعة (عربي ← فرنسي / إنجليزي)"),
+                                    bg=C_TEAL, size_hint_y=None, height=dp(44),
+                                    font_size=sp(13))
+        scroll = ScrollView(bar_width=dp(3))
+        form_layout = GridLayout(cols=1, spacing=dp(6), size_hint_y=None,
+                                 padding=(0, dp(4), 0, dp(8)))
         form_layout.bind(minimum_height=form_layout.setter("height"))
 
         self.inputs = {}
@@ -1553,30 +1739,35 @@ class ProductsScreen(Screen):
             ("rating", "التقييم (للزوار)", str(p.get("rating", 4.8))),
         ]
 
+        def _field_label(txt):
+            lb = Label(
+                text=format_ar(txt), color=(0.20, 0.25, 0.30, 1), bold=True,
+                font_size=sp(12), size_hint_y=None, height=dp(26),
+                halign="right", valign="bottom",
+                font_name=FONT_PATH if FONT_PATH else "Roboto")
+            lb.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
+            return lb
+
         for key, label_text, val in fields:
-            form_layout.add_widget(Label(
-                text=format_ar(label_text), color=(0.15, 0.15, 0.15, 1),
-                size_hint_y=None, height=dp(25), halign="right",
-                font_name=FONT_PATH if FONT_PATH else "Roboto"))
+            form_layout.add_widget(_field_label(label_text))
 
             if key == "category":
                 spinner = Spinner(
                     text=val if val in ("desktop", "android") else "desktop",
-                    values=("desktop", "android"), size_hint_y=None, height=dp(40),
-                    background_color=(0.15, 0.35, 0.55, 1), color=(1, 1, 1, 1))
+                    values=("desktop", "android"), size_hint_y=None, height=dp(42),
+                    font_name=FONT_PATH if FONT_PATH else "Roboto",
+                    background_normal="", background_down="",
+                    background_color=C_BLUE, color=(1, 1, 1, 1), bold=True)
                 self.inputs[key] = spinner
                 form_layout.add_widget(spinner)
                 continue
 
             if key == "image":
-                img_layout = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(5))
-                ti_img = TextInput(text=str(val), multiline=False, size_hint_x=0.70,
-                                   font_name=FONT_PATH if FONT_PATH else "Roboto")
+                img_layout = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(8))
+                ti_img = make_input(val, height=42, halign="left", size_hint_x=0.72)
                 self.inputs[key] = ti_img
-                btn_browse = Button(text=format_ar("استعراض"), size_hint_x=0.30,
-                                    background_color=(0.15, 0.35, 0.55, 1),
-                                    color=(1, 1, 1, 1),
-                                    font_name=FONT_PATH if FONT_PATH else "Roboto")
+                btn_browse = RoundButton(text=format_ar("استعراض"), bg=C_BLUE,
+                                         size_hint_x=0.28, font_size=sp(12))
                 btn_browse.bind(on_press=lambda x, field=ti_img: self.open_file_chooser_popup(field))
                 img_layout.add_widget(ti_img)
                 img_layout.add_widget(btn_browse)
@@ -1584,21 +1775,17 @@ class ProductsScreen(Screen):
                 continue
 
             if key in ("desc_ar", "desc_fr", "desc_en"):
-                ti = TextInput(text=str(val), multiline=True, size_hint_y=None,
-                               height=dp(120),
-                               font_name=FONT_PATH if FONT_PATH else "Roboto")
+                ti = make_input(val, multiline=True, height=110,
+                                halign="right" if key == "desc_ar" else "left")
+            elif key in ("icon", "color", "download_url", "name_fr", "name_en",
+                         "desc_fr", "desc_en", "version", "size", "rating"):
+                ti = make_input(val, height=42, halign="left")
             else:
-                ti = TextInput(text=str(val), multiline=False, size_hint_y=None,
-                               height=dp(40),
-                               font_name=FONT_PATH if FONT_PATH else "Roboto")
+                ti = make_input(val, height=42, halign="right")
             self.inputs[key] = ti
             form_layout.add_widget(ti)
 
-        form_layout.add_widget(Label(
-            text=format_ar("لقطات الشاشة (Screenshots)"),
-            color=(0.15, 0.15, 0.15, 1), size_hint_y=None,
-            height=dp(28), halign="right",
-            font_name=FONT_PATH if FONT_PATH else "Roboto"))
+        form_layout.add_widget(_field_label("لقطات الشاشة (Screenshots)"))
 
         self.screenshots_box = BoxLayout(orientation="vertical",
                                          size_hint_y=None, spacing=dp(4))
@@ -1614,9 +1801,17 @@ class ProductsScreen(Screen):
                     font_name=FONT_PATH if FONT_PATH else "Roboto"))
                 return
             for name in list(self.current_screenshots):
-                row = BoxLayout(size_hint_y=None, height=dp(36), spacing=dp(6))
+                row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8),
+                                padding=(dp(10), dp(2), dp(2), dp(2)))
+                with row.canvas.before:
+                    Color(1, 1, 1, 1)
+                    row_bg = RoundedRectangle(pos=row.pos, size=row.size,
+                                              radius=[dp(8)])
+                row.bind(pos=lambda i, v, r=row_bg: setattr(r, "pos", i.pos),
+                         size=lambda i, v, r=row_bg: setattr(r, "size", i.size))
                 lbl_name = Label(text=name, color=(0.2, 0.2, 0.2, 1),
-                                 halign="left", valign="middle", size_hint_x=0.78,
+                                 halign="left", valign="middle", size_hint_x=0.80,
+                                 shorten=True, shorten_from="right",
                                  font_name=FONT_PATH if FONT_PATH else "Roboto")
                 lbl_name.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
                 row.add_widget(lbl_name)
@@ -1628,19 +1823,14 @@ class ProductsScreen(Screen):
                         refresh_screenshots()
                     return _del
 
-                del_btn = Button(text="✕", size_hint_x=0.22,
-                                 background_color=(0.7, 0.2, 0.2, 1),
-                                 color=(1, 1, 1, 1),
-                                 font_name=FONT_PATH if FONT_PATH else "Roboto")
+                del_btn = RoundButton(text="X", bg=C_DANGER, radius=8,
+                                      size_hint_x=0.20)
                 del_btn.bind(on_press=make_del(name))
                 row.add_widget(del_btn)
                 self.screenshots_box.add_widget(row)
 
-        btn_add_ss = Button(text=format_ar("+ إضافة لقطات شاشة"),
-                            size_hint_y=None, height=dp(42),
-                            background_color=(0.15, 0.35, 0.55, 1),
-                            color=(1, 1, 1, 1), bold=True,
-                            font_name=FONT_PATH if FONT_PATH else "Roboto")
+        btn_add_ss = RoundButton(text=format_ar("+ إضافة لقطات شاشة"), bg=C_BLUE,
+                                 size_hint_y=None, height=dp(44), font_size=sp(13))
         btn_add_ss.bind(on_press=lambda x: self.open_screenshots_chooser(refresh_screenshots))
         form_layout.add_widget(btn_add_ss)
         refresh_screenshots()
@@ -1689,18 +1879,15 @@ class ProductsScreen(Screen):
         content.add_widget(btn_translate)
         content.add_widget(scroll)
 
-        btn_box = BoxLayout(size_hint_y=None, height=dp(45), spacing=dp(10))
-        btn_save_p = Button(text=format_ar("حفظ المنتج"),
-                            background_color=(0.05, 0.58, 0.38, 1),
-                            color=(1, 1, 1, 1),
-                            font_name=FONT_PATH if FONT_PATH else "Roboto")
-        btn_cancel = Button(text=format_ar("إلغاء"),
-                            background_color=(0.7, 0.2, 0.2, 1),
-                            color=(1, 1, 1, 1),
-                            font_name=FONT_PATH if FONT_PATH else "Roboto")
+        btn_box = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(10),
+                            padding=(0, dp(4), 0, 0))
+        btn_save_p = RoundButton(text=format_ar("حفظ المنتج"), bg=C_PRIMARY,
+                                 size_hint_x=0.64, font_size=sp(15))
+        btn_cancel = RoundButton(text=format_ar("إلغاء"), bg=C_NEUTRAL,
+                                 size_hint_x=0.36, font_size=sp(14))
 
         popup = Popup(title="", content=content, size_hint=(0.95, 0.95),
-                      separator_color=(0.05, 0.58, 0.38, 1))
+                      separator_color=C_PRIMARY, separator_height=dp(2))
 
         def save_action(instance):
             try:
@@ -1736,8 +1923,8 @@ class ProductsScreen(Screen):
 
         btn_save_p.bind(on_press=save_action)
         btn_cancel.bind(on_press=popup.dismiss)
-        btn_box.add_widget(btn_save_p)
         btn_box.add_widget(btn_cancel)
+        btn_box.add_widget(btn_save_p)
         content.add_widget(btn_box)
         popup.open()
 
@@ -1851,8 +2038,15 @@ class ProductsScreen(Screen):
                         with urllib.request.urlopen(req_put, context=SSL_CONTEXT):
                             pass
                     except urllib.error.HTTPError as e:
-                        err_body = e.read().decode("utf-8")
-                        raise Exception(f"فشل رفع {name} ({e.code}): {err_body[:80]}")
+                        hints = {
+                            401: "رمز الوصول (Token) غير صالح أو منتهي",
+                            403: "الرمز لا يملك صلاحية الكتابة (Contents: write)",
+                            404: "المستودع أو الفرع main غير موجود",
+                            422: "بيانات الملف غير صالحة",
+                        }
+                        raise Exception(
+                            f"فشل رفع {name} ({e.code}): "
+                            + hints.get(e.code, "خطأ من GitHub"))
 
                 set_status("تم الحفظ ورفع الملفات والصور إلى GitHub بنجاح!")
             except Exception as e:
@@ -2149,6 +2343,13 @@ class TechVaultApp(App):
         btn_box.add_widget(btn_cancel)
         content.add_widget(btn_box)
         popup.open()
+
+    # مهم: بدونها قد يُغلق التطبيق/يفقد النتيجة عند الذهاب لمنتقي الملفات
+    def on_pause(self):
+        return True
+
+    def on_resume(self):
+        pass
 
     def _on_keyboard(self, window, key, *args):
         if key == 27:
