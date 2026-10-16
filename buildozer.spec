@@ -25,7 +25,9 @@ requirements = python3,hostpython3,kivy==2.3.0,sqlite3,pillow,certifi,arabic-res
 orientation = portrait
 fullscreen = 0
 
-android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, READ_MEDIA_IMAGES, ACCESS_NETWORK_STATE
+android.permissions = INTERNET, READ_EXTERNAL_STORAGE, WRITE_EXTERNAL_STORAGE, READ_MEDIA_IMAGES, ACCESS_NETWORK_STATE,MANAGE_EXTERNAL_STORAGE
+
+
 
 android.api = 33
 android.minapi = 24

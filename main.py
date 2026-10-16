@@ -4,6 +4,7 @@ import os
 import re
 import ssl
 import threading
+import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -24,8 +25,31 @@ from kivy.uix.screenmanager import Screen, ScreenManager
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.filechooser import FileChooserIconView
+from kivy.utils import platform as _kivy_platform
 
-# ============ إصلاح SSL لـ Android ============
+
+# ============ التقاط أخطاء البدء ============
+def _log_startup_error(exc):
+    try:
+        paths = [
+            "/storage/emulated/0/Documents/techvault_error.txt",
+            os.path.join(os.path.expanduser("~"), "techvault_error.txt"),
+        ]
+        err = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        for p in paths:
+            try:
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write(err)
+                print(f"[TechVault] Error logged to: {p}")
+                break
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+# ============ إصلاح SSL ============
 try:
     import certifi
     SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
@@ -44,7 +68,7 @@ try:
 except ImportError:
     HAS_BIDI = False
 
-# ============ مسار الخط (ديناميكي) ============
+# ============ مسار الخط ============
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -62,7 +86,6 @@ print(f"[TechVault] FONT_PATH = {FONT_PATH}")
 
 
 def _user_index_path():
-    """مسار index.html المحفوظ محلياً (يبقى بعد إغلاق التطبيق)."""
     try:
         data_dir = App.get_running_app().user_data_dir
     except Exception:
@@ -84,12 +107,59 @@ def format_ar(text):
     return text_str
 
 
-# ============ ترجمة: Google أولاً ثم MyMemory ============
+# ============ Android Permissions ============
+def request_android_permissions():
+    if _kivy_platform != "android":
+        return
+    try:
+        from android.permissions import request_permissions, Permission
+        request_permissions([
+            Permission.READ_EXTERNAL_STORAGE,
+            Permission.WRITE_EXTERNAL_STORAGE,
+        ])
+    except Exception as e:
+        print(f"[TechVault] permissions error: {e}")
+
+
+def has_manage_external_storage():
+    if _kivy_platform != "android":
+        return True
+    try:
+        from jnius import autoclass
+        Build = autoclass('android.os.Build')
+        if Build.VERSION.SDK_INT < 30:
+            return True
+        Environment = autoclass('android.os.Environment')
+        return Environment.isExternalStorageManager()
+    except Exception as e:
+        print(f"[TechVault] check all files error: {e}")
+        return True
+
+
+def open_all_files_settings():
+    if _kivy_platform != "android":
+        return
+    try:
+        from jnius import autoclass
+        Build = autoclass('android.os.Build')
+        if Build.VERSION.SDK_INT < 30:
+            return
+        PythonActivity = autoclass('org.kivy.android.PythonActivity')
+        Intent = autoclass('android.content.Intent')
+        Uri = autoclass('android.net.Uri')
+        Settings = autoclass('android.provider.Settings')
+        pkg = PythonActivity.mActivity.getPackageName()
+        intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+        intent.setData(Uri.parse("package:" + pkg))
+        PythonActivity.mActivity.startActivity(intent)
+    except Exception as e:
+        print(f"[TechVault] open all files settings error: {e}")
+
+
+# ============ ترجمة ============
 def translate_text(text, target_lang):
     if not text or not text.strip():
         return ""
-
-    # ====== 1) Google Translate (غير رسمي، مجاني) ======
     try:
         url = (
             "https://translate.googleapis.com/translate_a/single"
@@ -105,7 +175,6 @@ def translate_text(text, target_lang):
         )
         with urllib.request.urlopen(req, timeout=6, context=SSL_CONTEXT) as r:
             data = json.loads(r.read().decode("utf-8"))
-
         if data and isinstance(data, list) and data[0]:
             parts = []
             for seg in data[0]:
@@ -113,12 +182,10 @@ def translate_text(text, target_lang):
                     parts.append(seg[0])
             result = "".join(parts).strip()
             if result:
-                print(f"[TechVault] Google OK: {result[:50]}")
                 return result
     except Exception as e:
         print(f"[TechVault] Google failed: {e}")
 
-    # ====== 2) MyMemory (احتياطي) ======
     try:
         url = (
             f"https://api.mymemory.translated.net/get"
@@ -127,127 +194,83 @@ def translate_text(text, target_lang):
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=6, context=SSL_CONTEXT) as r:
             data = json.loads(r.read().decode("utf-8"))
-
         status = data.get("responseStatus")
         if str(status) == "200":
             result = data.get("responseData", {}).get("translatedText", "").strip()
             if result:
-                print(f"[TechVault] MyMemory OK: {result[:50]}")
                 return result
     except Exception as e:
         print(f"[TechVault] MyMemory failed: {e}")
-
-    print("[TechVault] All translation services failed")
     return ""
 
 
 # ===================== 0. Splash =====================
 class SplashScreen(Screen):
-
     def __init__(self, **kwargs):
         super(SplashScreen, self).__init__(**kwargs)
         layout = BoxLayout(orientation="vertical", padding=dp(30), spacing=dp(15))
         logo_path = os.path.join(BASE_DIR, "logo.png")
-
         if os.path.exists(logo_path):
-            layout.add_widget(
-                Image(source=logo_path, allow_stretch=True, keep_ratio=True, size_hint=(1, 1))
-            )
+            layout.add_widget(Image(
+                source=logo_path, allow_stretch=True, keep_ratio=True, size_hint=(1, 1)
+            ))
         else:
-            layout.add_widget(
-                Label(
-                    text="TechVault DZ",
-                    font_size=sp(30),
-                    bold=True,
-                    color=(0.05, 0.58, 0.38, 1),
-                    font_name=FONT_PATH if FONT_PATH else "Roboto",
-                )
-            )
-
-        layout.add_widget(
-            Label(
-                text=format_ar("الخزنة الجزائرية للبرمجيات"),
-                font_size=sp(14),
-                color=(0.3, 0.3, 0.3, 1),
-                size_hint_y=None,
-                height=dp(30),
+            layout.add_widget(Label(
+                text="TechVault DZ", font_size=sp(30), bold=True,
+                color=(0.05, 0.58, 0.38, 1),
                 font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
-        )
+            ))
+        layout.add_widget(Label(
+            text=format_ar("الخزنة الجزائرية للبرمجيات"),
+            font_size=sp(14), color=(0.3, 0.3, 0.3, 1),
+            size_hint_y=None, height=dp(30),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        ))
         self.add_widget(layout)
 
 
 # ===================== 1. Login =====================
 class LoginScreen(Screen):
-
     def __init__(self, **kwargs):
         super(LoginScreen, self).__init__(**kwargs)
         layout = BoxLayout(
-            orientation="vertical",
-            padding=dp(20),
-            spacing=dp(12),
-            size_hint=(0.9, None),
-            height=dp(380),
+            orientation="vertical", padding=dp(20), spacing=dp(12),
+            size_hint=(0.9, None), height=dp(380),
             pos_hint={"center_x": 0.5, "center_y": 0.5},
         )
-
         logo_path = os.path.join(BASE_DIR, "logo.png")
         if os.path.exists(logo_path):
-            layout.add_widget(
-                Image(source=logo_path, size_hint_y=None, height=dp(110), allow_stretch=True)
-            )
-
-        layout.add_widget(
-            Label(
-                text=format_ar("TechVault DZ - قفل الخزنة"),
-                font_size=sp(18),
-                bold=True,
-                color=(0.05, 0.58, 0.38, 1),
-                size_hint_y=None,
-                height=dp(30),
-                font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
-        )
-
-        layout.add_widget(
-            Label(
-                text=format_ar("أدخل كلمة المرور:"),
-                font_size=sp(13),
-                color=(0.3, 0.3, 0.3, 1),
-                size_hint_y=None,
-                height=dp(25),
-                font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
-        )
-
+            layout.add_widget(Image(source=logo_path, size_hint_y=None, height=dp(110), allow_stretch=True))
+        layout.add_widget(Label(
+            text=format_ar("TechVault DZ - قفل الخزنة"),
+            font_size=sp(18), bold=True, color=(0.05, 0.58, 0.38, 1),
+            size_hint_y=None, height=dp(30),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        ))
+        layout.add_widget(Label(
+            text=format_ar("أدخل كلمة المرور:"),
+            font_size=sp(13), color=(0.3, 0.3, 0.3, 1),
+            size_hint_y=None, height=dp(25),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        ))
         self.pass_input = TextInput(
-            password=True,
-            multiline=False,
-            font_size=sp(16),
-            size_hint_y=None,
-            height=dp(42),
+            password=True, multiline=False, font_size=sp(16),
+            size_hint_y=None, height=dp(42),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         layout.add_widget(self.pass_input)
-
         btn_login = Button(
             text=format_ar("فتح الخزنة"),
-            size_hint_y=None,
-            height=dp(48),
+            size_hint_y=None, height=dp(48),
             background_color=(0.05, 0.58, 0.38, 1),
-            color=(1, 1, 1, 1),
-            font_size=sp(15),
-            bold=True,
+            color=(1, 1, 1, 1), font_size=sp(15), bold=True,
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_login.bind(on_press=self.check_password)
         layout.add_widget(btn_login)
-
         self.error_label = Label(
-            text="",
-            color=(0.7, 0.2, 0.2, 1),
-            size_hint_y=None,
-            height=dp(25),
+            text="", color=(0.7, 0.2, 0.2, 1),
+            size_hint_y=None, height=dp(25),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         layout.add_widget(self.error_label)
@@ -265,78 +288,51 @@ class LoginScreen(Screen):
 
 # ===================== 2. Home =====================
 class HomeScreen(Screen):
-
     def __init__(self, **kwargs):
         super(HomeScreen, self).__init__(**kwargs)
         layout = BoxLayout(
-            orientation="vertical",
-            padding=dp(20),
-            spacing=dp(15),
-            size_hint=(0.9, None),
-            height=dp(420),
+            orientation="vertical", padding=dp(20), spacing=dp(15),
+            size_hint=(0.9, None), height=dp(420),
             pos_hint={"center_x": 0.5, "center_y": 0.5},
         )
-
         logo_path = os.path.join(BASE_DIR, "logo.png")
         if os.path.exists(logo_path):
-            layout.add_widget(
-                Image(
-                    source=logo_path,
-                    size_hint_y=None,
-                    height=dp(120),
-                    allow_stretch=True,
-                    keep_ratio=True,
-                )
-            )
-
+            layout.add_widget(Image(
+                source=logo_path, size_hint_y=None, height=dp(120),
+                allow_stretch=True, keep_ratio=True,
+            ))
         btn_vault = Button(
             text=format_ar("Open Vault (إدارة المنتجات)"),
-            size_hint_y=None,
-            height=dp(50),
+            size_hint_y=None, height=dp(50),
             background_color=(0.05, 0.58, 0.38, 1),
-            color=(1, 1, 1, 1),
-            font_size=sp(14),
-            bold=True,
+            color=(1, 1, 1, 1), font_size=sp(14), bold=True,
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_vault.bind(on_press=lambda x: setattr(self.manager, "current", "products"))
-
         btn_logs = Button(
             text=format_ar("View Secure Logs (سجلات الأمان)"),
-            size_hint_y=None,
-            height=dp(50),
+            size_hint_y=None, height=dp(50),
             background_color=(0.7, 0.2, 0.2, 1),
-            color=(1, 1, 1, 1),
-            font_size=sp(14),
-            bold=True,
+            color=(1, 1, 1, 1), font_size=sp(14), bold=True,
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_logs.bind(on_press=lambda x: setattr(self.manager, "current", "logs"))
-
         btn_settings = Button(
             text=format_ar("Account Settings (الإعدادات)"),
-            size_hint_y=None,
-            height=dp(50),
+            size_hint_y=None, height=dp(50),
             background_color=(0.15, 0.35, 0.55, 1),
-            color=(1, 1, 1, 1),
-            font_size=sp(14),
-            bold=True,
+            color=(1, 1, 1, 1), font_size=sp(14), bold=True,
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_settings.bind(on_press=lambda x: setattr(self.manager, "current", "settings"))
-
         btn_lock = Button(
             text=format_ar("قفل التطبيق"),
-            size_hint_y=None,
-            height=dp(50),
+            size_hint_y=None, height=dp(50),
             background_color=(0.25, 0.25, 0.25, 1),
-            color=(1, 1, 1, 1),
-            font_size=sp(14),
-            bold=True,
+            color=(1, 1, 1, 1), font_size=sp(14), bold=True,
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_lock.bind(on_press=lambda x: setattr(self.manager, "current", "login"))
-
         layout.add_widget(btn_vault)
         layout.add_widget(btn_logs)
         layout.add_widget(btn_settings)
@@ -346,7 +342,6 @@ class HomeScreen(Screen):
 
 # ===================== 3. Products =====================
 class ProductsScreen(Screen):
-
     def __init__(self, **kwargs):
         super(ProductsScreen, self).__init__(**kwargs)
         self.products = []
@@ -362,49 +357,30 @@ class ProductsScreen(Screen):
         root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
 
         top_bar = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(4))
-
         btn_back = Button(
-            text=format_ar("رئيسية"),
-            size_hint_x=0.20,
-            background_color=(0.25, 0.25, 0.25, 1),
-            color=(1, 1, 1, 1),
-            font_size=sp(12),
-            font_name=FONT_PATH if FONT_PATH else "Roboto",
+            text=format_ar("رئيسية"), size_hint_x=0.20,
+            background_color=(0.25, 0.25, 0.25, 1), color=(1, 1, 1, 1),
+            font_size=sp(12), font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_back.bind(on_press=lambda x: setattr(self.manager, "current", "home"))
-
         btn_reload = Button(
-            text=format_ar("إعادة تحميل"),
-            size_hint_x=0.26,
-            background_color=(0.15, 0.35, 0.55, 1),
-            color=(1, 1, 1, 1),
-            font_size=sp(12),
-            font_name=FONT_PATH if FONT_PATH else "Roboto",
+            text=format_ar("إعادة تحميل"), size_hint_x=0.26,
+            background_color=(0.15, 0.35, 0.55, 1), color=(1, 1, 1, 1),
+            font_size=sp(12), font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_reload.bind(on_press=self.load_html)
-
         btn_open = Button(
-            text=format_ar("فتح ملف"),
-            size_hint_x=0.26,
-            background_color=(0.8, 0.5, 0.1, 1),
-            color=(1, 1, 1, 1),
-            font_size=sp(12),
-            bold=True,
-            font_name=FONT_PATH if FONT_PATH else "Roboto",
+            text=format_ar("فتح ملف"), size_hint_x=0.26,
+            background_color=(0.8, 0.5, 0.1, 1), color=(1, 1, 1, 1),
+            font_size=sp(12), bold=True, font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_open.bind(on_press=lambda x: self.open_html_chooser_popup())
-
         btn_from_gh = Button(
-            text=format_ar("من GitHub"),
-            size_hint_x=0.28,
-            background_color=(0.1, 0.1, 0.1, 1),
-            color=(1, 1, 1, 1),
-            font_size=sp(12),
-            bold=True,
-            font_name=FONT_PATH if FONT_PATH else "Roboto",
+            text=format_ar("من GitHub"), size_hint_x=0.28,
+            background_color=(0.1, 0.1, 0.1, 1), color=(1, 1, 1, 1),
+            font_size=sp(12), bold=True, font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_from_gh.bind(on_press=lambda x: self.download_html_from_github())
-
         top_bar.add_widget(btn_back)
         top_bar.add_widget(btn_reload)
         top_bar.add_widget(btn_open)
@@ -412,40 +388,26 @@ class ProductsScreen(Screen):
         root.add_widget(top_bar)
 
         action_bar = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(4))
-
         btn_add = Button(
-            text=format_ar("إضافة منتج"),
-            size_hint_x=0.35,
-            background_color=(0.05, 0.58, 0.38, 1),
-            color=(1, 1, 1, 1),
-            font_size=sp(13),
-            bold=True,
-            font_name=FONT_PATH if FONT_PATH else "Roboto",
+            text=format_ar("إضافة منتج"), size_hint_x=0.35,
+            background_color=(0.05, 0.58, 0.38, 1), color=(1, 1, 1, 1),
+            font_size=sp(13), bold=True, font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_add.bind(on_press=lambda x: self.open_product_form())
-
         btn_save = Button(
-            text=format_ar("حفظ ورفع إلى GitHub"),
-            size_hint_x=0.65,
-            background_color=(0.7, 0.2, 0.2, 1),
-            color=(1, 1, 1, 1),
-            font_size=sp(13),
-            bold=True,
-            font_name=FONT_PATH if FONT_PATH else "Roboto",
+            text=format_ar("حفظ ورفع إلى GitHub"), size_hint_x=0.65,
+            background_color=(0.7, 0.2, 0.2, 1), color=(1, 1, 1, 1),
+            font_size=sp(13), bold=True, font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_save.bind(on_press=self.save_and_push)
-
         action_bar.add_widget(btn_add)
         action_bar.add_widget(btn_save)
         root.add_widget(action_bar)
 
         self.status_label = Label(
             text=format_ar("إدارة منتجات TechVault DZ"),
-            size_hint_y=None,
-            height=dp(28),
-            color=(0.2, 0.2, 0.2, 1),
-            font_size=sp(12),
-            font_name=FONT_PATH if FONT_PATH else "Roboto",
+            size_hint_y=None, height=dp(28), color=(0.2, 0.2, 0.2, 1),
+            font_size=sp(12), font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         root.add_widget(self.status_label)
 
@@ -460,7 +422,6 @@ class ProductsScreen(Screen):
         if os.path.exists(self.html_path):
             self.load_html(None)
 
-    # ---------- كشف موضع مصفوفة المنتجات ----------
     def _find_products_array(self, content):
         m = re.search(r"const\s+products\s*=\s*", content)
         if not m:
@@ -470,7 +431,6 @@ class ProductsScreen(Screen):
             start += 1
         if start >= len(content) or content[start] != "[":
             return None
-
         depth = 0
         in_str = None
         esc = False
@@ -503,17 +463,14 @@ class ProductsScreen(Screen):
         start, end = pos
         return content[:start] + new_json_str + content[end:]
 
-    # ---------- تحويل JS object literal إلى JSON ----------
     def js_to_json(self, js_str):
         out = []
         i = 0
         n = len(js_str)
         in_str = None
         esc = False
-
         while i < n:
             c = js_str[i]
-
             if in_str:
                 if esc:
                     out.append(c)
@@ -530,7 +487,6 @@ class ProductsScreen(Screen):
                     out.append(c)
                 i += 1
                 continue
-
             if c == "'" or c == '"':
                 in_str = c
                 out.append('"')
@@ -556,21 +512,14 @@ class ProductsScreen(Screen):
                 continue
             else:
                 out.append(c)
-
             i += 1
-
         result = "".join(out)
-        result = re.sub(
-            r"([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:",
-            r'\1"\2":',
-            result,
-        )
+        result = re.sub(r"([{,]\s*)([a-zA-Z_$][a-zA-Z0-9_$]*)\s*:", r'\1"\2":', result)
         return result
 
     def json_to_js(self, py_list):
         return json.dumps(py_list, ensure_ascii=False, indent=4)
 
-    # ---------- تحميل HTML ----------
     def load_html(self, instance):
         if not os.path.exists(self.html_path):
             self.status_label.text = format_ar("خطأ: index.html غير موجود!")
@@ -578,83 +527,310 @@ class ProductsScreen(Screen):
         try:
             with open(self.html_path, "r", encoding="utf-8") as f:
                 content = f.read()
-
             pos = self._find_products_array(content)
             if pos is None:
-                self.status_label.text = format_ar(
-                    "لم أجد 'const products = [...]' في index.html"
-                )
+                self.status_label.text = format_ar("لم أجد 'const products = [...]' في index.html")
                 self.products = []
                 self.refresh_products_list()
                 return
-
             start, end = pos
             js_arr = content[start:end]
             json_str = self.js_to_json(js_arr)
             self.products = json.loads(json_str)
-
-            self.status_label.text = format_ar(
-                f"تم تحميل {len(self.products)} منتج بنجاح."
-            )
+            self.status_label.text = format_ar(f"تم تحميل {len(self.products)} منتج بنجاح.")
             self.refresh_products_list()
-
         except json.JSONDecodeError as e:
             self.status_label.text = format_ar(f"خطأ JSON: {str(e)[:40]}")
-            print(f"[TechVault] JSON error: {e}")
             self.products = []
             self.refresh_products_list()
         except Exception as e:
             self.status_label.text = format_ar(f"خطأ: {str(e)[:40]}")
             print(f"[TechVault] load_html error: {e}")
 
+    # ⭐⭐⭐ قائمة المنتجات (مع التصحيح) ⭐⭐⭐
     def refresh_products_list(self):
-        self.products_layout.clear_widgets()
-        for i, p in enumerate(self.products):
-            item_layout = BoxLayout(
-                orientation="horizontal",
-                size_hint_y=None,
-                height=dp(70),
-                spacing=dp(5),
-            )
-            name_ar = p.get("name", {}).get("ar", "بدون اسم")
-            cat = p.get("category", "desktop")
-            lbl = Label(
-                text=format_ar(f"{i+1}. {name_ar} [{cat.upper()}]"),
-                size_hint_x=0.6,
-                color=(0.1, 0.1, 0.1, 1),
-                font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
+        try:
+            self.products_layout.clear_widgets()
 
-            btn_edit = Button(
-                text=format_ar("تعديل"),
-                size_hint_x=0.2,
-                background_color=(0.15, 0.35, 0.55, 1),
-                color=(1, 1, 1, 1),
-                font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
-            btn_edit.bind(on_press=lambda x, idx=i: self.open_product_form(idx=idx))
+            if not self.products:
+                empty_lbl = Label(
+                    text=format_ar("لا توجد منتجات بعد\nاضغط 'إضافة منتج' للبدء"),
+                    color=(0.5, 0.5, 0.5, 1),
+                    font_size=sp(14),
+                    halign="center",
+                    valign="middle",
+                    size_hint_y=None,
+                    height=dp(80),
+                    font_name=FONT_PATH if FONT_PATH else "Roboto",
+                )
+                empty_lbl.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
+                self.products_layout.add_widget(empty_lbl)
+                return
 
-            btn_del = Button(
-                text=format_ar("حذف"),
-                size_hint_x=0.2,
-                background_color=(0.7, 0.2, 0.2, 1),
-                color=(1, 1, 1, 1),
-                font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
-            btn_del.bind(on_press=lambda x, idx=i: self.delete_product(idx))
+            for i, p in enumerate(self.products):
+                name_ar = p.get("name", {}).get("ar", "بدون اسم")
+                name_fr = p.get("name", {}).get("fr", "")
+                cat = p.get("category", "desktop").upper()
+                version = p.get("version", "v1.0.0")
+                size_mb = p.get("size", "—")
+                rating = p.get("rating", 0)
 
-            item_layout.add_widget(lbl)
-            item_layout.add_widget(btn_edit)
-            item_layout.add_widget(btn_del)
-            self.products_layout.add_widget(item_layout)
+                if cat == "ANDROID":
+                    accent = (0.05, 0.58, 0.38, 1)
+                else:
+                    accent = (0.15, 0.35, 0.55, 1)
 
-    def delete_product(self, idx):
-        if 0 <= idx < len(self.products):
+                card = BoxLayout(
+                    orientation="horizontal",
+                    size_hint_y=None,
+                    height=dp(120),
+                    padding=dp(10),
+                    spacing=dp(10),
+                )
+
+                with card.canvas.before:
+                    Color(1, 1, 1, 1)
+                    bg_rect = Rectangle(pos=card.pos, size=card.size)
+                    Color(accent[0], accent[1], accent[2], 0.9)
+                    border_rect = Rectangle(pos=card.pos, size=(dp(4), card.height))
+
+                def _update_graphics(inst, *args):
+                    try:
+                        bg_rect.pos = inst.pos
+                        bg_rect.size = inst.size
+                        border_rect.pos = inst.pos
+                        border_rect.size = (dp(4), inst.height)
+                    except Exception:
+                        pass
+
+                card.bind(pos=_update_graphics, size=_update_graphics)
+
+                icon_lbl = Label(
+                    text="[b]●[/b]", markup=True, color=accent,
+                    font_size=sp(20), size_hint_x=None, width=dp(30),
+                    halign="center", valign="middle",
+                )
+                card.add_widget(icon_lbl)
+
+                info_box = BoxLayout(orientation="vertical", spacing=dp(4))
+
+                title_lbl = Label(
+                    text=format_ar(name_ar),
+                    color=(0.1, 0.1, 0.1, 1),
+                    font_size=sp(14), bold=True,
+                    halign="right", valign="top",
+                    size_hint_y=None, height=dp(46),
+                    font_name=FONT_PATH if FONT_PATH else "Roboto",
+                )
+                title_lbl.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
+                info_box.add_widget(title_lbl)
+
+                if name_fr:
+                    subtitle_lbl = Label(
+                        text=str(name_fr),
+                        color=(0.5, 0.5, 0.5, 1),
+                        font_size=sp(11),
+                        halign="right", valign="middle",
+                        size_hint_y=None, height=dp(18),
+                        font_name=FONT_PATH if FONT_PATH else "Roboto",
+                    )
+                    subtitle_lbl.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
+                    info_box.add_widget(subtitle_lbl)
+
+                details_lbl = Label(
+                    text=f"{version}  •  {size_mb}  •  {rating} / 5",
+                    color=(0.4, 0.4, 0.4, 1),
+                    font_size=sp(11),
+                    halign="right", valign="middle",
+                    size_hint_y=None, height=dp(18),
+                    font_name=FONT_PATH if FONT_PATH else "Roboto",
+                )
+                details_lbl.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
+                info_box.add_widget(details_lbl)
+
+                card.add_widget(info_box)
+
+                cat_lbl = Label(
+                    text=cat, color=accent,
+                    font_size=sp(11), bold=True,
+                    halign="center", valign="middle",
+                    size_hint_x=None, width=dp(80),
+                    font_name=FONT_PATH if FONT_PATH else "Roboto",
+                )
+                card.add_widget(cat_lbl)
+
+                def make_clickable(c, idx):
+                    def on_touch_down(touch):
+                        if c.collide_point(*touch.pos):
+                            try:
+                                self.open_product_options(idx)
+                            except Exception as e:
+                                print(f"[TechVault] open options error: {e}")
+                            return True
+                        return False
+                    return on_touch_down
+
+                card.on_touch_down = make_clickable(card, i)
+                self.products_layout.add_widget(card)
+
+        except Exception as e:
+            print(f"[TechVault] refresh_products_list error: {e}")
+            traceback.print_exc()
+
+    def open_product_options(self, idx):
+        if not (0 <= idx < len(self.products)):
+            return
+        p = self.products[idx]
+        name_ar = p.get("name", {}).get("ar", "بدون اسم")
+        cat = p.get("category", "desktop").upper()
+        version = p.get("version", "v1.0.0")
+        size_mb = p.get("size", "—")
+
+        content = BoxLayout(orientation="vertical", padding=dp(18), spacing=dp(14))
+        with content.canvas.before:
+            Color(1, 1, 1, 1)
+            self.bg_options = Rectangle(size=content.size, pos=content.pos)
+        content.bind(
+            size=lambda s, w: setattr(self.bg_options, "size", s.size),
+            pos=lambda s, w: setattr(self.bg_options, "pos", s.pos),
+        )
+
+        title_lbl = Label(
+            text=format_ar(name_ar), font_size=sp(17), bold=True,
+            color=(0.1, 0.1, 0.1, 1),
+            halign="center", valign="middle",
+            size_hint_y=None, height=dp(40),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        title_lbl.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
+        content.add_widget(title_lbl)
+
+        info_lbl = Label(
+            text=format_ar(f"{cat}  •  {version}  •  {size_mb}"),
+            font_size=sp(12), color=(0.5, 0.5, 0.5, 1),
+            halign="center", valign="middle",
+            size_hint_y=None, height=dp(24),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        content.add_widget(info_lbl)
+
+        popup = Popup(
+            title="", content=content,
+            size_hint=(0.85, 0.5),
+            separator_color=(0.15, 0.35, 0.55, 1),
+            background_color=(0, 0, 0, 0.5),
+        )
+
+        btn_edit = Button(
+            text=format_ar("تعديل المنتج"),
+            size_hint_y=None, height=dp(52),
+            background_color=(0.15, 0.35, 0.55, 1),
+            color=(1, 1, 1, 1), font_size=sp(15), bold=True,
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+
+        def do_edit(btn):
+            popup.dismiss()
+            Clock.schedule_once(lambda dt: self.open_product_form(idx=idx), 0.3)
+
+        btn_edit.bind(on_press=do_edit)
+        content.add_widget(btn_edit)
+
+        btn_del = Button(
+            text=format_ar("حذف المنتج"),
+            size_hint_y=None, height=dp(52),
+            background_color=(0.7, 0.2, 0.2, 1),
+            color=(1, 1, 1, 1), font_size=sp(15), bold=True,
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+
+        def do_delete(btn):
+            popup.dismiss()
+            Clock.schedule_once(lambda dt: self.confirm_delete_product(idx), 0.3)
+
+        btn_del.bind(on_press=do_delete)
+        content.add_widget(btn_del)
+
+        btn_close = Button(
+            text=format_ar("إغلاق"),
+            size_hint_y=None, height=dp(48),
+            background_color=(0.5, 0.5, 0.5, 1),
+            color=(1, 1, 1, 1), font_size=sp(14),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        btn_close.bind(on_press=lambda x: popup.dismiss())
+        content.add_widget(btn_close)
+
+        popup.open()
+
+    def confirm_delete_product(self, idx):
+        if not (0 <= idx < len(self.products)):
+            return
+        p = self.products[idx]
+        name_ar = p.get("name", {}).get("ar", "بدون اسم")
+
+        content = BoxLayout(orientation="vertical", padding=dp(18), spacing=dp(14))
+        with content.canvas.before:
+            Color(1, 1, 1, 1)
+            self.bg_del = Rectangle(size=content.size, pos=content.pos)
+        content.bind(
+            size=lambda s, w: setattr(self.bg_del, "size", s.size),
+            pos=lambda s, w: setattr(self.bg_del, "pos", s.pos),
+        )
+
+        content.add_widget(Label(
+            text=format_ar("تأكيد الحذف"),
+            font_size=sp(17), bold=True, color=(0.7, 0.2, 0.2, 1),
+            halign="center", valign="middle",
+            size_hint_y=None, height=dp(36),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        ))
+
+        msg = Label(
+            text=format_ar(f"هل أنت متأكد من حذف:\n\n« {name_ar} »\n\nلا يمكن التراجع عن هذه العملية."),
+            font_size=sp(13), halign="center", valign="middle",
+            color=(0.2, 0.2, 0.2, 1),
+            size_hint_y=None, height=dp(110),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        msg.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
+        content.add_widget(msg)
+
+        popup = Popup(
+            title="", content=content,
+            size_hint=(0.85, 0.45),
+            separator_color=(0.7, 0.2, 0.2, 1),
+            background_color=(0, 0, 0, 0.5),
+        )
+
+        btn_box = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+
+        def do_delete(btn):
+            popup.dismiss()
             del self.products[idx]
             self.refresh_products_list()
-            self.status_label.text = format_ar("تم الحذف. اضغط 'حفظ' في الأعلى.")
+            self.status_label.text = format_ar("تم الحذف. اضغط 'حفظ ورفع إلى GitHub' في الأعلى.")
 
-    # ---------- نسخ الملف المختار إلى user_data ----------
+        btn_yes = Button(
+            text=format_ar("نعم، احذف"),
+            background_color=(0.7, 0.2, 0.2, 1),
+            color=(1, 1, 1, 1), font_size=sp(14), bold=True,
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        btn_yes.bind(on_press=do_delete)
+        btn_no = Button(
+            text=format_ar("إلغاء"),
+            background_color=(0.5, 0.5, 0.5, 1),
+            color=(1, 1, 1, 1), font_size=sp(14),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        btn_no.bind(on_press=lambda x: popup.dismiss())
+        btn_box.add_widget(btn_yes)
+        btn_box.add_widget(btn_no)
+        content.add_widget(btn_box)
+
+        popup.open()
+
     def _save_local_copy(self, src_path):
         try:
             dst = _user_index_path()
@@ -669,8 +845,71 @@ class ProductsScreen(Screen):
             print(f"[TechVault] save local copy error: {e}")
             return False
 
-    # ---------- نافذة اختيار ملف HTML ----------
+    def _show_all_files_dialog(self):
+        content = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
+        with content.canvas.before:
+            Color(0.96, 0.98, 0.96, 1)
+            self.bg_perm = Rectangle(size=content.size, pos=content.pos)
+        content.bind(
+            size=lambda s, w: setattr(self.bg_perm, "size", s.size),
+            pos=lambda s, w: setattr(self.bg_perm, "pos", s.pos),
+        )
+        content.add_widget(Label(
+            text=format_ar("صلاحية مطلوبة"),
+            font_size=sp(16), bold=True, color=(0.7, 0.2, 0.2, 1),
+            size_hint_y=None, height=dp(35),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        ))
+        msg = Label(
+            text=format_ar(
+                "لتتمكن من فتح ملفات HTML من هاتفك،\n"
+                "يجب تفعيل صلاحية 'الوصول لجميع الملفات'\n"
+                "في إعدادات التطبيق.\n\n"
+                "اضغط 'فتح الإعدادات' ثم اختر\n"
+                "'السماح بالوصول لجميع الملفات'."
+            ),
+            font_size=sp(12), halign="center", valign="middle",
+            color=(0.15, 0.15, 0.15, 1),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        msg.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
+        content.add_widget(msg)
+
+        popup = Popup(
+            title="", content=content,
+            size_hint=(0.9, 0.55),
+            separator_color=(0.7, 0.2, 0.2, 1),
+        )
+
+        btn_box = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+        btn_open = Button(
+            text=format_ar("فتح الإعدادات"),
+            background_color=(0.05, 0.58, 0.38, 1),
+            color=(1, 1, 1, 1), bold=True,
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+
+        def open_settings(btn):
+            popup.dismiss()
+            open_all_files_settings()
+
+        btn_open.bind(on_press=open_settings)
+        btn_cancel = Button(
+            text=format_ar("لاحقاً"),
+            background_color=(0.25, 0.25, 0.25, 1),
+            color=(1, 1, 1, 1),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        btn_cancel.bind(on_press=popup.dismiss)
+        btn_box.add_widget(btn_open)
+        btn_box.add_widget(btn_cancel)
+        content.add_widget(btn_box)
+        popup.open()
+
     def open_html_chooser_popup(self):
+        if not has_manage_external_storage():
+            self._show_all_files_dialog()
+            return
         content = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(10))
         with content.canvas.before:
             Color(0.12, 0.15, 0.13, 1)
@@ -679,36 +918,33 @@ class ProductsScreen(Screen):
             size=lambda s, w: setattr(self.bg_html_chooser, "size", s.size),
             pos=lambda s, w: setattr(self.bg_html_chooser, "pos", s.pos),
         )
-
-        initial_path = "/sdcard" if os.path.exists("/sdcard") else os.path.expanduser("~")
+        initial_path = "/storage/emulated/0"
+        if not os.path.exists(initial_path):
+            initial_path = "/sdcard"
+        if not os.path.exists(initial_path):
+            initial_path = os.path.expanduser("~")
         file_chooser = FileChooserIconView(
             filters=["*.html", "*.htm"], path=initial_path, size_hint=(1, 1)
         )
         content.add_widget(file_chooser)
-
         btn_layout = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
         btn_select = Button(
             text=format_ar("فتح هذا الملف"),
             background_color=(0.05, 0.58, 0.38, 1),
-            color=(1, 1, 1, 1),
-            bold=True,
+            color=(1, 1, 1, 1), bold=True,
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_cancel = Button(
             text=format_ar("إلغاء"),
             background_color=(0.7, 0.2, 0.2, 1),
-            color=(1, 1, 1, 1),
-            bold=True,
+            color=(1, 1, 1, 1), bold=True,
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
-
         popup = Popup(
             title=format_ar("اختر ملف index.html"),
             title_font=FONT_PATH if FONT_PATH else "Roboto",
-            title_size=sp(15),
-            title_align="center",
-            content=content,
-            size_hint=(0.94, 0.92),
+            title_size=sp(15), title_align="center",
+            content=content, size_hint=(0.94, 0.92),
             separator_color=(0.8, 0.5, 0.1, 1),
         )
 
@@ -716,9 +952,7 @@ class ProductsScreen(Screen):
             if file_chooser.selection:
                 chosen = file_chooser.selection[0]
                 if self._save_local_copy(chosen):
-                    self.status_label.text = format_ar(
-                        f"تم فتح: {os.path.basename(chosen)}"
-                    )
+                    self.status_label.text = format_ar(f"تم فتح: {os.path.basename(chosen)}")
                     self.load_html(None)
                 else:
                     self.status_label.text = format_ar("فشل نسخ الملف المختار.")
@@ -731,29 +965,21 @@ class ProductsScreen(Screen):
         content.add_widget(btn_layout)
         popup.open()
 
-    # ---------- جلب index.html من GitHub ----------
     def download_html_from_github(self):
         cfg = self.load_gh_config()
         user = cfg.get("user", "").strip()
         repo = cfg.get("repo", "").strip()
-
         if not user or not repo:
-            self.status_label.text = format_ar(
-                "حدّد بيانات GitHub أولاً من الإعدادات."
-            )
+            self.status_label.text = format_ar("حدّد بيانات GitHub أولاً من الإعدادات.")
             return
-
         self.status_label.text = format_ar("جاري جلب index.html من GitHub...")
 
         def bg():
             try:
                 raw_url = f"https://raw.githubusercontent.com/{user}/{repo}/main/index.html"
-                req = urllib.request.Request(
-                    raw_url, headers={"User-Agent": "TechVault-DZ-App"}
-                )
+                req = urllib.request.Request(raw_url, headers={"User-Agent": "TechVault-DZ-App"})
                 with urllib.request.urlopen(req, timeout=10, context=SSL_CONTEXT) as r:
                     data = r.read().decode("utf-8")
-
                 dst = _user_index_path()
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 with open(dst, "w", encoding="utf-8") as f:
@@ -762,9 +988,7 @@ class ProductsScreen(Screen):
                 def done(dt):
                     self.html_path = dst
                     self.load_html(None)
-                    self.status_label.text = format_ar(
-                        "تم جلب index.html من GitHub بنجاح!"
-                    )
+                    self.status_label.text = format_ar("تم جلب index.html من GitHub بنجاح!")
 
                 Clock.schedule_once(done, 0)
             except Exception as e:
@@ -777,7 +1001,6 @@ class ProductsScreen(Screen):
 
         threading.Thread(target=bg, daemon=True).start()
 
-    # ---------- الرجوع للنسخة الأصلية ----------
     def reset_to_bundled_html(self):
         try:
             user_html = _user_index_path()
@@ -789,8 +1012,10 @@ class ProductsScreen(Screen):
         except Exception as e:
             self.status_label.text = format_ar(f"خطأ: {str(e)[:30]}")
 
-    # ---------- نافذة اختيار صورة المنتج ----------
     def open_file_chooser_popup(self, text_input_field):
+        if not has_manage_external_storage():
+            self._show_all_files_dialog()
+            return
         content = BoxLayout(orientation="vertical", padding=dp(12), spacing=dp(10))
         with content.canvas.before:
             Color(0.12, 0.15, 0.13, 1)
@@ -799,36 +1024,33 @@ class ProductsScreen(Screen):
             size=lambda s, w: setattr(self.bg_chooser, "size", s.size),
             pos=lambda s, w: setattr(self.bg_chooser, "pos", s.pos),
         )
-
-        initial_path = "/sdcard" if os.path.exists("/sdcard") else os.path.expanduser("~")
+        initial_path = "/storage/emulated/0"
+        if not os.path.exists(initial_path):
+            initial_path = "/sdcard"
+        if not os.path.exists(initial_path):
+            initial_path = os.path.expanduser("~")
         file_chooser = FileChooserIconView(
             filters=["*.png", "*.jpg", "*.jpeg"], path=initial_path, size_hint=(1, 1)
         )
         content.add_widget(file_chooser)
-
         btn_layout = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(10))
         btn_select = Button(
             text=format_ar("اختيار هذه الصورة"),
             background_color=(0.05, 0.58, 0.38, 1),
-            color=(1, 1, 1, 1),
-            bold=True,
+            color=(1, 1, 1, 1), bold=True,
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_cancel = Button(
             text=format_ar("إلغاء"),
             background_color=(0.7, 0.2, 0.2, 1),
-            color=(1, 1, 1, 1),
-            bold=True,
+            color=(1, 1, 1, 1), bold=True,
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
-
         popup = Popup(
             title=format_ar("اختر صورة المنتج"),
             title_font=FONT_PATH if FONT_PATH else "Roboto",
-            title_size=sp(16),
-            title_align="center",
-            content=content,
-            size_hint=(0.94, 0.92),
+            title_size=sp(16), title_align="center",
+            content=content, size_hint=(0.94, 0.92),
             separator_color=(0.05, 0.58, 0.38, 1),
         )
 
@@ -842,13 +1064,11 @@ class ProductsScreen(Screen):
 
         btn_select.bind(on_press=on_select)
         btn_cancel.bind(on_press=popup.dismiss)
-
         btn_layout.add_widget(btn_select)
         btn_layout.add_widget(btn_cancel)
         content.add_widget(btn_layout)
         popup.open()
 
-    # ---------- نموذج إضافة/تعديل منتج ----------
     def open_product_form(self, idx=None):
         is_edit = idx is not None
         p = (
@@ -877,27 +1097,19 @@ class ProductsScreen(Screen):
             size=lambda s, w: setattr(self.bg_rect1, "size", s.size),
             pos=lambda s, w: setattr(self.bg_rect1, "pos", s.pos),
         )
-
-        header_lbl = Label(
+        content.add_widget(Label(
             text=format_ar("إدارة المنتجات"),
-            font_size=sp(16),
-            bold=True,
-            color=(0.05, 0.58, 0.38, 1),
-            size_hint_y=None,
-            height=dp(35),
+            font_size=sp(16), bold=True, color=(0.05, 0.58, 0.38, 1),
+            size_hint_y=None, height=dp(35),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
-        )
-        content.add_widget(header_lbl)
-
+        ))
         btn_translate = Button(
             text=format_ar("ترجمة آلية سريعة"),
-            size_hint_y=None,
-            height=dp(42),
+            size_hint_y=None, height=dp(42),
             background_color=(0.15, 0.35, 0.55, 1),
             color=(1, 1, 1, 1),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
-
         scroll = ScrollView()
         form_layout = GridLayout(cols=1, spacing=dp(8), size_hint_y=None)
         form_layout.bind(minimum_height=form_layout.setter("height"))
@@ -922,22 +1134,17 @@ class ProductsScreen(Screen):
 
         for key, label_text, val in fields:
             lbl = Label(
-                text=format_ar(label_text),
-                color=(0.15, 0.15, 0.15, 1),
-                size_hint_y=None,
-                height=dp(25),
-                halign="right",
+                text=format_ar(label_text), color=(0.15, 0.15, 0.15, 1),
+                size_hint_y=None, height=dp(25), halign="right",
                 font_name=FONT_PATH if FONT_PATH else "Roboto",
             )
-            lbl.bind(size=lambda s, w: setattr(s, "text_size", (s.width, s.height)))
             form_layout.add_widget(lbl)
 
             if key == "category":
                 spinner = Spinner(
                     text=val if val in ("desktop", "android") else "desktop",
                     values=("desktop", "android"),
-                    size_hint_y=None,
-                    height=dp(40),
+                    size_hint_y=None, height=dp(40),
                     background_color=(0.15, 0.35, 0.55, 1),
                     color=(1, 1, 1, 1),
                 )
@@ -948,45 +1155,36 @@ class ProductsScreen(Screen):
             if key == "image":
                 img_layout = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(5))
                 ti_img = TextInput(
-                    text=str(val),
-                    multiline=False,
-                    size_hint_x=0.70,
+                    text=str(val), multiline=False, size_hint_x=0.70,
                     font_name=FONT_PATH if FONT_PATH else "Roboto",
                 )
                 self.inputs[key] = ti_img
                 btn_browse = Button(
-                    text=format_ar("استعراض"),
-                    size_hint_x=0.30,
+                    text=format_ar("استعراض"), size_hint_x=0.30,
                     background_color=(0.15, 0.35, 0.55, 1),
                     color=(1, 1, 1, 1),
                     font_name=FONT_PATH if FONT_PATH else "Roboto",
                 )
-                btn_browse.bind(
-                    on_press=lambda x, field=ti_img: self.open_file_chooser_popup(field)
-                )
+                btn_browse.bind(on_press=lambda x, field=ti_img: self.open_file_chooser_popup(field))
                 img_layout.add_widget(ti_img)
                 img_layout.add_widget(btn_browse)
                 form_layout.add_widget(img_layout)
                 continue
 
             ti = TextInput(
-                text=str(val),
-                multiline=False,
-                size_hint_y=None,
-                height=dp(40),
+                text=str(val), multiline=False,
+                size_hint_y=None, height=dp(40),
                 font_name=FONT_PATH if FONT_PATH else "Roboto",
             )
             self.inputs[key] = ti
             form_layout.add_widget(ti)
 
-        # ============ الترجمة: تحديث الواجهة من main thread ============
         def run_translation(instance):
             ar_n = self.inputs["name_ar"].text.strip()
             ar_d = self.inputs["desc_ar"].text.strip()
             if not ar_n and not ar_d:
                 self.status_label.text = format_ar("أدخل النص بالعربية أولاً للترجمة.")
                 return
-
             btn_translate.disabled = True
             self.status_label.text = format_ar("جاري الترجمة...")
 
@@ -1005,14 +1203,11 @@ class ProductsScreen(Screen):
                         self.inputs["desc_fr"].text = tr_desc_fr
                     if tr_desc_en:
                         self.inputs["desc_en"].text = tr_desc_en
-
                     got_any = any([tr_name_fr, tr_name_en, tr_desc_fr, tr_desc_en])
                     if got_any:
                         self.status_label.text = format_ar("تمت الترجمة الآلية بنجاح!")
                     else:
-                        self.status_label.text = format_ar(
-                            "فشلت الترجمة. تحقق من الإنترنت."
-                        )
+                        self.status_label.text = format_ar("فشلت الترجمة. تحقق من الإنترنت.")
                     btn_translate.disabled = False
 
                 Clock.schedule_once(update_ui, 0)
@@ -1039,8 +1234,7 @@ class ProductsScreen(Screen):
         )
 
         popup = Popup(
-            title="",
-            content=content,
+            title="", content=content,
             size_hint=(0.95, 0.95),
             separator_color=(0.05, 0.58, 0.38, 1),
         )
@@ -1085,29 +1279,21 @@ class ProductsScreen(Screen):
         content.add_widget(btn_box)
         popup.open()
 
-    # ---------- حفظ HTML محلياً ----------
     def save_html(self, instance):
         try:
             with open(self.html_path, "r", encoding="utf-8") as f:
                 content = f.read()
-
             new_json = self.json_to_js(self.products)
             new_content = self._replace_products_array(content, new_json)
-
             if new_content is None:
-                self.status_label.text = format_ar(
-                    "لم أجد مصفوفة المنتجات في index.html"
-                )
+                self.status_label.text = format_ar("لم أجد مصفوفة المنتجات في index.html")
                 return
-
             with open(self.html_path, "w", encoding="utf-8") as f:
                 f.write(new_content)
             self.status_label.text = format_ar("تم حفظ index.html بنجاح!")
-
         except Exception as e:
             self.status_label.text = format_ar(f"خطأ حفظ: {str(e)[:40]}")
 
-    # ---------- إعدادات GitHub ----------
     def _gh_config_path(self):
         return os.path.join(App.get_running_app().user_data_dir, "github_config.json")
 
@@ -1126,7 +1312,6 @@ class ProductsScreen(Screen):
         except Exception:
             pass
 
-    # ---------- حفظ ثم رفع ----------
     def save_and_push(self, instance):
         cfg = self.load_gh_config()
         if not (cfg.get("user") and cfg.get("repo") and cfg.get("token")):
@@ -1135,13 +1320,10 @@ class ProductsScreen(Screen):
         self.save_html(None)
         self.status_label.text = format_ar("جاري الرفع إلى GitHub...")
         self.push_to_github(
-            cfg["user"],
-            cfg["repo"],
-            cfg["token"],
+            cfg["user"], cfg["repo"], cfg["token"],
             lambda msg: setattr(self.status_label, "text", format_ar(msg)),
         )
 
-    # ---------- الرفع إلى GitHub ----------
     def push_to_github(self, user, repo, token, status_cb):
         def set_status(msg):
             Clock.schedule_once(lambda dt: status_cb(msg), 0)
@@ -1170,12 +1352,8 @@ class ProductsScreen(Screen):
                                 sd_path = os.path.join("/sdcard/Download", img_name)
                                 if os.path.exists(sd_path):
                                     local_img_path = sd_path
-
-                        if (
-                            local_img_path
-                            and os.path.exists(local_img_path)
-                            and (img_name, local_img_path) not in files
-                        ):
+                        if (local_img_path and os.path.exists(local_img_path)
+                                and (img_name, local_img_path) not in files):
                             files.append((img_name, local_img_path))
 
                 for name, path in files:
@@ -1187,11 +1365,9 @@ class ProductsScreen(Screen):
                             sha = json.loads(resp.read().decode("utf-8")).get("sha", "")
                     except Exception:
                         pass
-
                     with open(path, "rb") as f:
                         file_bytes = f.read()
                     encoded = base64.b64encode(file_bytes).decode("utf-8")
-
                     payload = {
                         "message": f"Update {name} via TechVault DZ Dashboard",
                         "content": encoded,
@@ -1199,12 +1375,10 @@ class ProductsScreen(Screen):
                     }
                     if sha:
                         payload["sha"] = sha
-
                     req_put = urllib.request.Request(
                         api_url,
                         data=json.dumps(payload).encode("utf-8"),
-                        headers=headers,
-                        method="PUT",
+                        headers=headers, method="PUT",
                     )
                     try:
                         with urllib.request.urlopen(req_put, context=SSL_CONTEXT) as resp:
@@ -1219,7 +1393,6 @@ class ProductsScreen(Screen):
 
         threading.Thread(target=background_push, daemon=True).start()
 
-    # ---------- نافذة إعدادات GitHub ----------
     def open_github_popup(self, instance, then_push=False):
         saved_cfg = self.load_gh_config()
         content = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
@@ -1230,85 +1403,57 @@ class ProductsScreen(Screen):
             size=lambda s, w: setattr(self.bg_rect2, "size", s.size),
             pos=lambda s, w: setattr(self.bg_rect2, "pos", s.pos),
         )
-
-        header_lbl = Label(
+        content.add_widget(Label(
             text=format_ar("مزامنة GitHub"),
-            font_size=sp(16),
-            bold=True,
-            color=(0.05, 0.58, 0.38, 1),
-            size_hint_y=None,
-            height=dp(35),
+            font_size=sp(16), bold=True, color=(0.05, 0.58, 0.38, 1),
+            size_hint_y=None, height=dp(35),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
-        )
-        content.add_widget(header_lbl)
-
-        content.add_widget(
-            Label(
-                text=format_ar("اسم المالك أو المنظمة (Owner):"),
-                color=(0.15, 0.15, 0.15, 1),
-                size_hint_y=None,
-                height=dp(25),
-                font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
-        )
+        ))
+        content.add_widget(Label(
+            text=format_ar("اسم المالك أو المنظمة (Owner):"),
+            color=(0.15, 0.15, 0.15, 1),
+            size_hint_y=None, height=dp(25),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        ))
         ti_user = TextInput(
-            text=saved_cfg.get("user", ""),
-            multiline=False,
-            size_hint_y=None,
-            height=dp(40),
+            text=saved_cfg.get("user", ""), multiline=False,
+            size_hint_y=None, height=dp(40),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         content.add_widget(ti_user)
-
-        content.add_widget(
-            Label(
-                text=format_ar("اسم المستودع (Repository Name):"),
-                color=(0.15, 0.15, 0.15, 1),
-                size_hint_y=None,
-                height=dp(25),
-                font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
-        )
+        content.add_widget(Label(
+            text=format_ar("اسم المستودع (Repository Name):"),
+            color=(0.15, 0.15, 0.15, 1),
+            size_hint_y=None, height=dp(25),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        ))
         ti_repo = TextInput(
-            text=saved_cfg.get("repo", ""),
-            multiline=False,
-            size_hint_y=None,
-            height=dp(40),
+            text=saved_cfg.get("repo", ""), multiline=False,
+            size_hint_y=None, height=dp(40),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         content.add_widget(ti_repo)
-
-        content.add_widget(
-            Label(
-                text=format_ar("رمز الوصول (Personal Access Token):"),
-                color=(0.15, 0.15, 0.15, 1),
-                size_hint_y=None,
-                height=dp(25),
-                font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
-        )
+        content.add_widget(Label(
+            text=format_ar("رمز الوصول (Personal Access Token):"),
+            color=(0.15, 0.15, 0.15, 1),
+            size_hint_y=None, height=dp(25),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        ))
         ti_token = TextInput(
-            text=saved_cfg.get("token", ""),
-            password=True,
-            multiline=False,
-            size_hint_y=None,
-            height=dp(40),
+            text=saved_cfg.get("token", ""), password=True, multiline=False,
+            size_hint_y=None, height=dp(40),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         content.add_widget(ti_token)
-
         lbl_git_status = Label(
-            text="",
-            color=(0.05, 0.58, 0.38, 1),
-            size_hint_y=None,
-            height=dp(25),
+            text="", color=(0.05, 0.58, 0.38, 1),
+            size_hint_y=None, height=dp(25),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         content.add_widget(lbl_git_status)
 
         popup = Popup(
-            title="",
-            content=content,
+            title="", content=content,
             size_hint=(0.9, 0.75),
             separator_color=(0.05, 0.58, 0.38, 1),
         )
@@ -1331,11 +1476,9 @@ class ProductsScreen(Screen):
             user = ti_user.text.strip()
             repo = ti_repo.text.strip()
             token = ti_token.text.strip()
-
             if not user or not repo or not token:
                 lbl_git_status.text = format_ar("الرجاء ملء جميع الحقول المطلوبة!")
                 return
-
             self.store_gh_config(user, repo, token)
             lbl_git_status.text = format_ar("تم حفظ البيانات بنجاح!")
             popup.dismiss()
@@ -1345,13 +1488,11 @@ class ProductsScreen(Screen):
         btn_box.add_widget(btn_push)
         btn_box.add_widget(btn_cancel)
         content.add_widget(btn_box)
-
         popup.open()
 
 
 # ===================== 4. Logs =====================
 class LogsScreen(Screen):
-
     def __init__(self, **kwargs):
         super(LogsScreen, self).__init__(**kwargs)
         scroll = ScrollView()
@@ -1359,60 +1500,40 @@ class LogsScreen(Screen):
             orientation="vertical", padding=dp(15), spacing=dp(12), size_hint_y=None
         )
         layout.bind(minimum_height=layout.setter("height"))
-
         logo_path = os.path.join(BASE_DIR, "logo.png")
         if os.path.exists(logo_path):
-            layout.add_widget(
-                Image(source=logo_path, size_hint_y=None, height=dp(90), allow_stretch=True)
-            )
-
-        layout.add_widget(
-            Label(
-                text=format_ar("سجلات الأمان والاتصال (Secure Logs)"),
-                font_size=sp(16),
-                bold=True,
-                color=(0.7, 0.2, 0.2, 1),
-                size_hint_y=None,
-                height=dp(30),
-                font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
-        )
-
-        sample_logs = [
+            layout.add_widget(Image(source=logo_path, size_hint_y=None, height=dp(90), allow_stretch=True))
+        layout.add_widget(Label(
+            text=format_ar("سجلات الأمان والاتصال (Secure Logs)"),
+            font_size=sp(16), bold=True, color=(0.7, 0.2, 0.2, 1),
+            size_hint_y=None, height=dp(30),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        ))
+        for log in [
             "2026-06-06 12:00:22 - Admin Login Successful [DZ]",
             "2026-06-06 12:10:05 - index.html updated successfully",
             "2026-06-06 12:15:30 - Product added to vault (Desktop)",
-        ]
-
-        for log in sample_logs:
-            layout.add_widget(
-                Label(
-                    text=log,
-                    size_hint_y=None,
-                    height=dp(30),
-                    color=(0.3, 0.3, 0.3, 1),
-                    font_name=FONT_PATH if FONT_PATH else "Roboto",
-                )
-            )
-
+        ]:
+            layout.add_widget(Label(
+                text=log, size_hint_y=None, height=dp(30),
+                color=(0.3, 0.3, 0.3, 1),
+                font_name=FONT_PATH if FONT_PATH else "Roboto",
+            ))
         btn_back = Button(
             text=format_ar("العودة للرئيسية"),
-            size_hint_y=None,
-            height=dp(45),
+            size_hint_y=None, height=dp(45),
             background_color=(0.25, 0.25, 0.25, 1),
             color=(1, 1, 1, 1),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_back.bind(on_press=lambda x: setattr(self.manager, "current", "home"))
         layout.add_widget(btn_back)
-
         scroll.add_widget(layout)
         self.add_widget(scroll)
 
 
 # ===================== 5. Settings =====================
 class SettingsScreen(Screen):
-
     def __init__(self, **kwargs):
         super(SettingsScreen, self).__init__(**kwargs)
         scroll = ScrollView()
@@ -1420,107 +1541,67 @@ class SettingsScreen(Screen):
             orientation="vertical", padding=dp(15), spacing=dp(12), size_hint_y=None
         )
         layout.bind(minimum_height=layout.setter("height"))
-
         logo_path = os.path.join(BASE_DIR, "logo.png")
         if os.path.exists(logo_path):
-            layout.add_widget(
-                Image(source=logo_path, size_hint_y=None, height=dp(90), allow_stretch=True)
-            )
-
-        layout.add_widget(
-            Label(
-                text=format_ar("إعدادات الحساب والنظام (Account Settings)"),
-                font_size=sp(16),
-                bold=True,
-                color=(0.15, 0.35, 0.55, 1),
-                size_hint_y=None,
-                height=dp(30),
-                font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
-        )
-
-        layout.add_widget(
-            Label(
-                text=format_ar("إصدار التطبيق: v2.1.0 (TechVault DZ)"),
-                size_hint_y=None,
-                height=dp(25),
-                color=(0.2, 0.2, 0.2, 1),
-                font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
-        )
-        layout.add_widget(
-            Label(
-                text=format_ar("حالة الاتصال: متصل بالخزنة المحلية"),
-                size_hint_y=None,
-                height=dp(25),
-                color=(0.2, 0.2, 0.2, 1),
-                font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
-        )
-
+            layout.add_widget(Image(source=logo_path, size_hint_y=None, height=dp(90), allow_stretch=True))
+        layout.add_widget(Label(
+            text=format_ar("إعدادات الحساب والنظام (Account Settings)"),
+            font_size=sp(16), bold=True, color=(0.15, 0.35, 0.55, 1),
+            size_hint_y=None, height=dp(30),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        ))
+        layout.add_widget(Label(
+            text=format_ar("إصدار التطبيق: v2.1.0 (TechVault DZ)"),
+            size_hint_y=None, height=dp(25), color=(0.2, 0.2, 0.2, 1),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        ))
+        layout.add_widget(Label(
+            text=format_ar("حالة الاتصال: متصل بالخزنة المحلية"),
+            size_hint_y=None, height=dp(25), color=(0.2, 0.2, 0.2, 1),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        ))
         btn_change_pass = Button(
             text=format_ar("تغيير كلمة المرور (Change Password)"),
-            size_hint_y=None,
-            height=dp(45),
+            size_hint_y=None, height=dp(45),
             background_color=(0.8, 0.5, 0.1, 1),
-            color=(1, 1, 1, 1),
-            font_size=sp(14),
-            bold=True,
+            color=(1, 1, 1, 1), font_size=sp(14), bold=True,
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_change_pass.bind(on_press=self.open_change_password_popup)
         layout.add_widget(btn_change_pass)
-
         btn_gh_settings = Button(
             text=format_ar("بيانات GitHub (تغيير)"),
-            size_hint_y=None,
-            height=dp(45),
+            size_hint_y=None, height=dp(45),
             background_color=(0.1, 0.1, 0.1, 1),
-            color=(1, 1, 1, 1),
-            font_size=sp(14),
-            bold=True,
+            color=(1, 1, 1, 1), font_size=sp(14), bold=True,
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
-        btn_gh_settings.bind(
-            on_press=lambda x: self.manager.get_screen("products").open_github_popup(None)
-        )
+        btn_gh_settings.bind(on_press=lambda x: self.manager.get_screen("products").open_github_popup(None))
         layout.add_widget(btn_gh_settings)
-
         btn_reset_html = Button(
             text=format_ar("إعادة تعيين index.html للأصل"),
-            size_hint_y=None,
-            height=dp(45),
+            size_hint_y=None, height=dp(45),
             background_color=(0.5, 0.2, 0.5, 1),
-            color=(1, 1, 1, 1),
-            font_size=sp(14),
-            bold=True,
+            color=(1, 1, 1, 1), font_size=sp(14), bold=True,
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
-        btn_reset_html.bind(
-            on_press=lambda x: self.manager.get_screen("products").reset_to_bundled_html()
-        )
+        btn_reset_html.bind(on_press=lambda x: self.manager.get_screen("products").reset_to_bundled_html())
         layout.add_widget(btn_reset_html)
-
         self.msg_label = Label(
-            text="",
-            color=(0.05, 0.58, 0.38, 1),
-            size_hint_y=None,
-            height=dp(25),
+            text="", color=(0.05, 0.58, 0.38, 1),
+            size_hint_y=None, height=dp(25),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         layout.add_widget(self.msg_label)
-
         btn_back = Button(
             text=format_ar("العودة للرئيسية"),
-            size_hint_y=None,
-            height=dp(45),
+            size_hint_y=None, height=dp(45),
             background_color=(0.25, 0.25, 0.25, 1),
             color=(1, 1, 1, 1),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         btn_back.bind(on_press=lambda x: setattr(self.manager, "current", "home"))
         layout.add_widget(btn_back)
-
         scroll.add_widget(layout)
         self.add_widget(scroll)
 
@@ -1533,61 +1614,41 @@ class SettingsScreen(Screen):
             size=lambda s, w: setattr(self.bg_rect3, "size", s.size),
             pos=lambda s, w: setattr(self.bg_rect3, "pos", s.pos),
         )
-
-        header_lbl = Label(
+        content.add_widget(Label(
             text=format_ar("تغيير كلمة المرور"),
-            font_size=sp(16),
-            bold=True,
-            color=(0.05, 0.58, 0.38, 1),
-            size_hint_y=None,
-            height=dp(35),
+            font_size=sp(16), bold=True, color=(0.05, 0.58, 0.38, 1),
+            size_hint_y=None, height=dp(35),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
-        )
-        content.add_widget(header_lbl)
-
-        content.add_widget(
-            Label(
-                text=format_ar("كلمة المرور الحالية:"),
-                color=(0.15, 0.15, 0.15, 1),
-                size_hint_y=None,
-                height=dp(25),
-                font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
-        )
+        ))
+        content.add_widget(Label(
+            text=format_ar("كلمة المرور الحالية:"),
+            color=(0.15, 0.15, 0.15, 1),
+            size_hint_y=None, height=dp(25),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        ))
         old_pass = TextInput(
-            password=True,
-            multiline=False,
-            size_hint_y=None,
-            height=dp(40),
+            password=True, multiline=False,
+            size_hint_y=None, height=dp(40),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         content.add_widget(old_pass)
-
-        content.add_widget(
-            Label(
-                text=format_ar("كلمة المرور الجديدة:"),
-                color=(0.15, 0.15, 0.15, 1),
-                size_hint_y=None,
-                height=dp(25),
-                font_name=FONT_PATH if FONT_PATH else "Roboto",
-            )
-        )
+        content.add_widget(Label(
+            text=format_ar("كلمة المرور الجديدة:"),
+            color=(0.15, 0.15, 0.15, 1),
+            size_hint_y=None, height=dp(25),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        ))
         new_pass = TextInput(
-            password=True,
-            multiline=False,
-            size_hint_y=None,
-            height=dp(40),
+            password=True, multiline=False,
+            size_hint_y=None, height=dp(40),
             font_name=FONT_PATH if FONT_PATH else "Roboto",
         )
         content.add_widget(new_pass)
-
         popup = Popup(
-            title="",
-            content=content,
+            title="", content=content,
             size_hint=(0.85, 0.5),
             separator_color=(0.05, 0.58, 0.38, 1),
         )
-
         btn_box = BoxLayout(size_hint_y=None, height=dp(45), spacing=dp(10))
         btn_save = Button(
             text=format_ar("حفظ"),
@@ -1610,9 +1671,7 @@ class SettingsScreen(Screen):
                     self.msg_label.text = format_ar("تم تغيير كلمة المرور بنجاح!")
                     popup.dismiss()
                 else:
-                    self.msg_label.text = format_ar(
-                        "كلمة المرور الجديدة لا يمكن أن تكون فارغة!"
-                    )
+                    self.msg_label.text = format_ar("كلمة المرور الجديدة لا يمكن أن تكون فارغة!")
             else:
                 self.msg_label.text = format_ar("كلمة المرور الحالية غير صحيحة!")
 
@@ -1621,7 +1680,6 @@ class SettingsScreen(Screen):
         btn_box.add_widget(btn_save)
         btn_box.add_widget(btn_cancel)
         content.add_widget(btn_box)
-
         popup.open()
 
 
@@ -1631,6 +1689,8 @@ class TechVaultApp(App):
 
     def build(self):
         self.title = "TechVault DZ Dashboard"
+        if _kivy_platform == "android":
+            request_android_permissions()
         sm = ScreenManager()
         sm.add_widget(SplashScreen(name="splash"))
         sm.add_widget(LoginScreen(name="login"))
@@ -1638,10 +1698,70 @@ class TechVaultApp(App):
         sm.add_widget(ProductsScreen(name="products"))
         sm.add_widget(LogsScreen(name="logs"))
         sm.add_widget(SettingsScreen(name="settings"))
-
         Window.bind(on_keyboard=self._on_keyboard)
+        if _kivy_platform == "android":
+            Clock.schedule_once(lambda dt: self._check_all_files_once(), 3.0)
         Clock.schedule_once(lambda dt: setattr(sm, "current", "login"), 2.5)
         return sm
+
+    def _check_all_files_once(self):
+        if has_manage_external_storage():
+            return
+        content = BoxLayout(orientation="vertical", padding=dp(15), spacing=dp(10))
+        with content.canvas.before:
+            Color(0.96, 0.98, 0.96, 1)
+            self.bg_chk = Rectangle(size=content.size, pos=content.pos)
+        content.bind(
+            size=lambda s, w: setattr(self.bg_chk, "size", s.size),
+            pos=lambda s, w: setattr(self.bg_chk, "pos", s.pos),
+        )
+        content.add_widget(Label(
+            text=format_ar("تفعيل صلاحية الملفات"),
+            font_size=sp(16), bold=True, color=(0.7, 0.2, 0.2, 1),
+            size_hint_y=None, height=dp(35),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        ))
+        msg = Label(
+            text=format_ar(
+                "لفتح ملفات HTML من هاتفك،\n"
+                "يحتاج التطبيق إلى صلاحية\n"
+                "'الوصول لجميع الملفات'."
+            ),
+            font_size=sp(12), halign="center",
+            color=(0.15, 0.15, 0.15, 1),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        msg.bind(width=lambda s, w: setattr(s, "text_size", (w, None)))
+        content.add_widget(msg)
+        popup = Popup(
+            title="", content=content,
+            size_hint=(0.9, 0.45),
+            separator_color=(0.7, 0.2, 0.2, 1),
+        )
+        btn_box = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+        btn_open = Button(
+            text=format_ar("فتح الإعدادات"),
+            background_color=(0.05, 0.58, 0.38, 1),
+            color=(1, 1, 1, 1), bold=True,
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+
+        def open_settings(btn):
+            popup.dismiss()
+            open_all_files_settings()
+
+        btn_open.bind(on_press=open_settings)
+        btn_cancel = Button(
+            text=format_ar("لاحقاً"),
+            background_color=(0.25, 0.25, 0.25, 1),
+            color=(1, 1, 1, 1),
+            font_name=FONT_PATH if FONT_PATH else "Roboto",
+        )
+        btn_cancel.bind(on_press=popup.dismiss)
+        btn_box.add_widget(btn_open)
+        btn_box.add_widget(btn_cancel)
+        content.add_widget(btn_box)
+        popup.open()
 
     def _on_keyboard(self, window, key, *args):
         if key == 27:
@@ -1653,4 +1773,8 @@ class TechVaultApp(App):
 
 
 if __name__ == "__main__":
-    TechVaultApp().run()
+    try:
+        TechVaultApp().run()
+    except Exception as e:
+        _log_startup_error(e)
+        raise
