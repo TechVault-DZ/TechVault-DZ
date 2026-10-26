@@ -297,6 +297,9 @@
         const GC_CODE = 'techvault';
         const GC_ON = GC_CODE !== 'YOUR_CODE' && GC_CODE !== '';
         const GC_BASE = `https://${GC_CODE}.goatcounter.com`;
+        // عدّاد التحميلات المعروض (Abacus - مجاني بدون تسجيل)
+        const AB_BASE = 'https://abacus.jasoncameron.dev';
+        const AB_NS = 'techvault-dz-github-io';
         const dlCounts = {};
 
         if (GC_ON) {
@@ -324,25 +327,40 @@
 
         function loadCounts() {
             if (!GC_ON) return;
-            fetchCount(location.pathname).then(v => v != null ? v : fetchCount('TOTAL')).then(v => {
-                if (v != null) document.getElementById('visitorCount').textContent = v;
-            });
+            // عدّاد الزوار: زيادة مرة واحدة لكل متصفح، وبعدها قراءة فقط
+            let seen = false;
+            try { seen = !!localStorage.getItem('tv-visited'); } catch (e) { seen = true; }
+            fetch(`${AB_BASE}/${seen ? 'get' : 'hit'}/${AB_NS}/visitors`)
+                .then(r => r.ok ? r.json() : { value: 0 })
+                .then(d => {
+                    document.getElementById('visitorCount').textContent = d.value;
+                    if (!seen) { try { localStorage.setItem('tv-visited', '1'); } catch (e) {} }
+                })
+                .catch(() => { document.getElementById('visitorCount').textContent = '0'; });
             products.forEach(p => {
-                fetchCount('/download-' + p.id).then(v => {
-                    if (v == null) return;           // لا نكتب 0 فوق رقم موجود
-                    dlCounts[p.id] = v;
-                    applyCounts();
-                });
+                fetch(`${AB_BASE}/get/${AB_NS}/download-${p.id}`)
+                    .then(r => r.ok ? r.json() : { value: 0 })   // 404 = لم يُحمَّل بعد
+                    .then(d => { dlCounts[p.id] = String(d.value); applyCounts(); })
+                    .catch(() => {});
             });
         }
 
         function trackDownload(id) {
-            if (!GC_ON || !window.goatcounter || !window.goatcounter.count) return;
-            window.goatcounter.count({ path: '/download-' + id, title: 'Download ' + id });
-            // تحديث فوري للرقم المعروض
-            const n = parseInt(String(dlCounts[id] || '0').replace(/\D/g, ''), 10) || 0;
-            dlCounts[id] = String(n + 1);
-            applyCounts();
+            // لوحة GoatCounter (للإحصاءات فقط)
+            if (GC_ON && window.goatcounter && window.goatcounter.count) {
+                window.goatcounter.count({ path: 'download-' + id, title: 'Download ' + id, event: true });
+            }
+            // العدّاد المعروض في الصفحة: مرة واحدة لكل متصفح لكل تطبيق
+            const k = 'dl-counted-' + id;
+            try { if (localStorage.getItem(k)) return; } catch (e) {}
+            fetch(`${AB_BASE}/hit/${AB_NS}/download-${id}`)
+                .then(r => r.json())
+                .then(d => {
+                    dlCounts[id] = String(d.value);
+                    applyCounts();
+                    try { localStorage.setItem(k, '1'); } catch (e) {}
+                })
+                .catch(() => {});
         }
 
         let currentLang = 'ar';
