@@ -53,6 +53,7 @@
     </main>
 
     <footer class="border-t border-gray-200 dark:border-gray-800 mt-20 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
+        <p class="mb-2"><i class="fa-solid fa-eye text-emerald-600"></i> <span data-i18n="visitors">عدد الزوار</span>: <strong id="visitorCount" class="text-gray-700 dark:text-gray-200">…</strong></p>
         <p>&copy; 2026 <span data-i18n="siteTitle">TechVault DZ</span>. <span data-i18n="footerText">صنع في الجزائر 🇩🇿</span></p>
     </footer>
 
@@ -255,7 +256,9 @@
                 size: "الحجم",
                 download: "تحميل",
                 screenshots: "لقطات الشاشة",
-                footerText: "صنع في الجزائر 🇩🇿"
+                footerText: "صنع في الجزائر 🇩🇿",
+                visitors: "عدد الزوار",
+                downloads: "تحميل"
             },
             fr: {
                 siteTitle: "TechVault DZ",
@@ -268,7 +271,9 @@
                 size: "Taille",
                 download: "Télécharger",
                 screenshots: "Captures d'écran",
-                footerText: "Fait en Algérie 🇩🇿"
+                footerText: "Fait en Algérie 🇩🇿",
+                visitors: "Visiteurs",
+                downloads: "téléchargements"
             },
             en: {
                 siteTitle: "TechVault DZ",
@@ -281,9 +286,62 @@
                 size: "Size",
                 download: "Download",
                 screenshots: "Screenshots",
-                footerText: "Made in Algeria 🇩🇿"
+                footerText: "Made in Algeria 🇩🇿",
+                visitors: "Visitors",
+                downloads: "downloads"
             }
         };
+
+        // ============ Analytics (GoatCounter) ============
+        // ضع هنا اسم حسابك في goatcounter.com (الجزء الذي قبل .goatcounter.com)
+        const GC_CODE = 'techvault';
+        const GC_ON = GC_CODE !== 'YOUR_CODE' && GC_CODE !== '';
+        const GC_BASE = `https://${GC_CODE}.goatcounter.com`;
+        const dlCounts = {};
+
+        if (GC_ON) {
+            const gc = document.createElement('script');
+            gc.async = true;
+            gc.src = '//gc.zgo.at/count.js';
+            gc.setAttribute('data-goatcounter', GC_BASE + '/count');
+            document.head.appendChild(gc);
+        }
+
+        function fetchCount(path) {
+            return fetch(`${GC_BASE}/counter/${encodeURIComponent(path)}.json`)
+                .then(r => r.ok ? r.json() : Promise.reject())
+                .then(d => d.count)
+                .catch(() => null);
+        }
+
+        function applyCounts() {
+            document.querySelectorAll('[data-dl]').forEach(el => {
+                const v = dlCounts[el.dataset.dl];
+                el.textContent = v == null ? '0' : v;
+            });
+        }
+
+        function loadCounts() {
+            if (!GC_ON) return;
+            fetchCount('TOTAL').then(v => {
+                if (v != null) document.getElementById('visitorCount').textContent = v;
+            });
+            products.forEach(p => {
+                fetchCount('download-' + p.id).then(v => {
+                    dlCounts[p.id] = v == null ? '0' : v;
+                    applyCounts();
+                });
+            });
+        }
+
+        function trackDownload(id) {
+            if (!GC_ON || !window.goatcounter || !window.goatcounter.count) return;
+            window.goatcounter.count({ path: 'download-' + id, title: 'Download ' + id, event: true });
+            // تحديث فوري للرقم المعروض
+            const n = parseInt(String(dlCounts[id] || '0').replace(/\D/g, ''), 10) || 0;
+            dlCounts[id] = String(n + 1);
+            applyCounts();
+        }
 
         let currentLang = 'ar';
         let currentCategory = 'all';
@@ -396,9 +454,10 @@
                             <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pt-3 border-t border-gray-100 dark:border-gray-700">
                                 <span>${t.version}: <strong class="text-gray-700 dark:text-gray-200">${p.version}</strong></span>
                                 <span>${t.size}: <strong class="text-gray-700 dark:text-gray-200">${p.size}</strong></span>
+                                <span title="${t.downloads}"><i class="fa-solid fa-download"></i> <strong class="text-gray-700 dark:text-gray-200" data-dl="${p.id}">0</strong></span>
                             </div>
                             ${shotsBtn}
-                            <a href="${downloadUrl}" target="_blank" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 text-sm">
+                            <a href="${downloadUrl}" target="_blank" rel="noopener" onclick="trackDownload(${p.id})" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 text-sm">
                                 <i class="fa-solid fa-download"></i>
                                 <span>${t.download}</span>
                             </a>
@@ -406,6 +465,7 @@
                     </div>
                 `;
             });
+            applyCounts();
         }
 
         // ============ Gallery Logic ============
@@ -444,6 +504,8 @@
         });
 
         filterProducts();
+        loadCounts();
     </script>
 </body>
 </html>
+
