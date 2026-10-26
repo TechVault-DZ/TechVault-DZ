@@ -307,13 +307,12 @@
             document.head.appendChild(gc);
         }
 
-        // GoatCounter يطلب المسار كاملاً وبشرطة مائلة في البداية، لذلك نجرّب الصيغتين
+        // المسار يجب أن يبدأ بشرطة مائلة (حسب وثائق GoatCounter)
         function fetchCount(path) {
-            const tryPath = p => fetch(`${GC_BASE}/counter/${encodeURIComponent(p)}.json`)
+            return fetch(`${GC_BASE}/counter/${encodeURIComponent(path)}.json`)
                 .then(r => r.ok ? r.json() : Promise.reject())
-                .then(d => d.count);
-            if (path === 'TOTAL') return tryPath(path).catch(() => null);
-            return tryPath('/' + path).catch(() => tryPath(path)).catch(() => null);
+                .then(d => d.count)
+                .catch(() => null);
         }
 
         function applyCounts() {
@@ -325,11 +324,11 @@
 
         function loadCounts() {
             if (!GC_ON) return;
-            fetchCount('TOTAL').then(v => {
+            fetchCount(location.pathname).then(v => v != null ? v : fetchCount('TOTAL')).then(v => {
                 if (v != null) document.getElementById('visitorCount').textContent = v;
             });
             products.forEach(p => {
-                fetchCount('download-' + p.id).then(v => {
+                fetchCount('/download-' + p.id).then(v => {
                     if (v == null) return;           // لا نكتب 0 فوق رقم موجود
                     dlCounts[p.id] = v;
                     applyCounts();
@@ -339,7 +338,7 @@
 
         function trackDownload(id) {
             if (!GC_ON || !window.goatcounter || !window.goatcounter.count) return;
-            window.goatcounter.count({ path: '/download-' + id, title: 'Download ' + id, event: true });
+            window.goatcounter.count({ path: '/download-' + id, title: 'Download ' + id });
             // تحديث فوري للرقم المعروض
             const n = parseInt(String(dlCounts[id] || '0').replace(/\D/g, ''), 10) || 0;
             dlCounts[id] = String(n + 1);
