@@ -307,11 +307,13 @@
             document.head.appendChild(gc);
         }
 
+        // GoatCounter يطلب المسار كاملاً وبشرطة مائلة في البداية، لذلك نجرّب الصيغتين
         function fetchCount(path) {
-            return fetch(`${GC_BASE}/counter/${encodeURIComponent(path)}.json`)
+            const tryPath = p => fetch(`${GC_BASE}/counter/${encodeURIComponent(p)}.json`)
                 .then(r => r.ok ? r.json() : Promise.reject())
-                .then(d => d.count)
-                .catch(() => null);
+                .then(d => d.count);
+            if (path === 'TOTAL') return tryPath(path).catch(() => null);
+            return tryPath('/' + path).catch(() => tryPath(path)).catch(() => null);
         }
 
         function applyCounts() {
@@ -328,7 +330,8 @@
             });
             products.forEach(p => {
                 fetchCount('download-' + p.id).then(v => {
-                    dlCounts[p.id] = v == null ? '0' : v;
+                    if (v == null) return;           // لا نكتب 0 فوق رقم موجود
+                    dlCounts[p.id] = v;
                     applyCounts();
                 });
             });
@@ -336,7 +339,7 @@
 
         function trackDownload(id) {
             if (!GC_ON || !window.goatcounter || !window.goatcounter.count) return;
-            window.goatcounter.count({ path: 'download-' + id, title: 'Download ' + id, event: true });
+            window.goatcounter.count({ path: '/download-' + id, title: 'Download ' + id, event: true });
             // تحديث فوري للرقم المعروض
             const n = parseInt(String(dlCounts[id] || '0').replace(/\D/g, ''), 10) || 0;
             dlCounts[id] = String(n + 1);
